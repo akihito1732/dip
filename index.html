@@ -149,9 +149,10 @@
   .map-fab.active svg{ color:var(--orange); }
   #locateBtn{ right:12px; bottom:14px; }
   #themeBtn{ right:12px; top:66px; }
-  #themeBtn .i-moon{ display:none; }
-  :root[data-theme="light"] #themeBtn .i-sun{ display:none; }
-  :root[data-theme="light"] #themeBtn .i-moon{ display:block; }
+  /* 今のモードを表すアイコンを出す(ダーク=月、ライト=太陽) */
+  #themeBtn .i-sun{ display:none; }
+  :root[data-theme="light"] #themeBtn .i-moon{ display:none; }
+  :root[data-theme="light"] #themeBtn .i-sun{ display:block; }
   #historyBtn{ left:12px; top:12px; }
   .zoom-stack{
     position:absolute; left:12px; bottom:14px; z-index:500;
@@ -819,7 +820,7 @@
     </div>
 
     <button class="map-fab" id="themeBtn" aria-label="表示モードの切り替え">
-      <!-- ダーク表示中は太陽(=ライトへ)、ライト表示中は月(=ダークへ)を出す -->
+      <!-- 今のモードを表す:ダーク表示中は月、ライト表示中は太陽 -->
       <svg class="i-sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round">
         <circle cx="12" cy="12" r="4.2"/>
         <line x1="12" y1="2.5" x2="12" y2="4.8"/><line x1="12" y1="19.2" x2="12" y2="21.5"/>
