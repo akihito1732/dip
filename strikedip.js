@@ -1,5 +1,10 @@
 /* ============================================================
-   strikedip.js — 走向・傾斜の記法変換と記号の描画
+   strikedip.js — 走向・傾斜のすべて
+     1) センサー:利用許可と、端末の向き(alpha/beta/gamma)の読み取り
+     2) 計算    :端末の向き → 傾斜角・傾斜方向・走向
+     3) 表記    :N30°W / 45°NE、8方位、NS・EW
+     4) 記号    :地図に置く走向傾斜記号(SVG)
+   走向・傾斜の改良は、基本的にこのファイルだけを直せばよい。
 
    前提となる座標系:
      - 方位はいずれも「北を0°として時計回り360°」(スマホのコンパスと同じ)
@@ -16,7 +21,86 @@
   var FLAT_MAX = 2;    // これ未満は水平とみなす
   var VERTICAL_MIN = 88; // これを超えると垂直とみなす
 
-  /* ---------- 計算 ---------- */
+  /* ---------- 1) センサー ---------- */
+
+  // 端末の向きを読む許可を求める(iOSは明示的な許可が必要)
+  function requestPermission() {
+    return new Promise(function (resolve) {
+      if (typeof DeviceOrientationEvent !== 'undefined' &&
+          typeof DeviceOrientationEvent.requestPermission === 'function') {
+        DeviceOrientationEvent.requestPermission()
+          .then(function (state) { resolve(state === 'granted'); })
+          .catch(function () { resolve(false); });
+      } else if (typeof DeviceOrientationEvent !== 'undefined') {
+        resolve(true);   // iOS以外は明示的な許可リクエストが不要な場合が多い
+      } else {
+        resolve(false);
+      }
+    });
+  }
+
+  // 端末の向きを1回だけ読む(4秒で取れなければ失敗)
+  function readOnce() {
+    return new Promise(function (resolve, reject) {
+      var done = false;
+      var timeoutId = setTimeout(function () {
+        if (done) return;
+        done = true;
+        window.removeEventListener('deviceorientationabsolute', onAbsolute);
+        window.removeEventListener('deviceorientation', onRelative);
+        reject(new Error('timeout'));
+      }, 4000);
+      function finish(data) {
+        if (done) return;
+        done = true;
+        clearTimeout(timeoutId);
+        window.removeEventListener('deviceorientationabsolute', onAbsolute);
+        window.removeEventListener('deviceorientation', onRelative);
+        resolve(data);
+      }
+      function onAbsolute(e) {
+        if (e.alpha == null) return;
+        finish({ alpha: e.alpha, beta: e.beta || 0, gamma: e.gamma || 0, absolute: true });
+      }
+      function onRelative(e) {
+        if (typeof e.webkitCompassHeading === 'number') {
+          // iOS: webkitCompassHeadingは磁北基準の実測値なので、標準alphaの向きに変換して使う
+          finish({ alpha: (360 - e.webkitCompassHeading) % 360, beta: e.beta || 0, gamma: e.gamma || 0, absolute: true });
+        } else if (e.alpha != null) {
+          finish({ alpha: e.alpha, beta: e.beta || 0, gamma: e.gamma || 0, absolute: !!e.absolute });
+        }
+      }
+      window.addEventListener('deviceorientationabsolute', onAbsolute);
+      window.addEventListener('deviceorientation', onRelative);
+    });
+  }
+
+  /* ---------- 2) 計算:端末の向き → 傾斜角・傾斜方向・走向 ----------
+     W3C DeviceOrientation仕様の回転行列(alpha/beta/gamma → 地表座標系)に基づき、
+     端末の画面表向きベクトル[0,0,1]を東(E)・北(N)・上(U)成分に変換する。
+     計測姿勢は「端末の背面を露頭面に当て、画面を上に向けた状態」を想定。
+     方位はいずれも磁北基準(偏角は未補正)。 */
+  function compute(alpha, beta, gamma) {
+    var d2r = Math.PI / 180;
+    var a = alpha * d2r, b = beta * d2r, g = gamma * d2r;
+    var cA = Math.cos(a), sA = Math.sin(a);
+    var cB = Math.cos(b), sB = Math.sin(b);
+    var cG = Math.cos(g), sG = Math.sin(g);
+
+    var E = cG * sA * sB + cA * sG;
+    var N = sA * sG - cA * cG * sB;
+    var U = cB * cG;
+
+    var dip = Math.acos(Math.max(-1, Math.min(1, U))) * 180 / Math.PI;
+    var frontAz = Math.atan2(E, N) * 180 / Math.PI;
+    if (frontAz < 0) frontAz += 360;
+    var heading = (frontAz + 180) % 360;      // 端末背面が向く方位(一般的なコンパス方位)
+    var dipDirection = heading;                // 傾斜方向(下り方向)の方位
+    var strike = (dipDirection + 270) % 360;   // 走向 = 傾斜方向 - 90°
+    return { heading: heading, dip: dip, dipDirection: dipDirection, strike: strike };
+  }
+
+  /* ---------- 計算(走向と記号の向き) ---------- */
 
   // 傾斜方向から走向を求める(右手系:傾斜方向の90°反時計回り)
   function strikeFromDipDirection(dipDir) {
@@ -62,7 +146,7 @@
     return strikeNotation(strike) + ' / ' + dipNotation(orientation.dip, orientation.dipDirection);
   }
 
-  /* ---------- 描画 ---------- */
+  /* ---------- 4) 記号の描画 ---------- */
 
   // 記号のSVG(文字は入れない)。sizeはビューボックスの一辺。
   function symbolSvg(orientation, color, size) {
@@ -114,6 +198,11 @@
   }
 
   global.StrikeDip = {
+    // センサーと計算
+    requestPermission: requestPermission,
+    readOnce: readOnce,
+    compute: compute,
+    // 表記と記号
     strikeFromDipDirection: strikeFromDipDirection,
     symbolRotation: symbolRotation,
     strikeNotation: strikeNotation,

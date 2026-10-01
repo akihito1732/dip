@@ -912,7 +912,7 @@
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-opacity="flood"><span data-opval="flood">60%</span></div>
       </div>
       <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-overlay="tsunami"> 津波浸水想定区域</label>
+        <label class="overlay-row"><input type="checkbox" data-overlay="tsunami"> 津波浸水想定</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-opacity="tsunami"><span data-opval="tsunami">60%</span></div>
       </div>
       <div class="overlay-item">
@@ -1549,7 +1549,7 @@ locateBtn.addEventListener('click', async ()=>{
   if(followMode === 'off'){
     setFollowMode('follow');
   } else if(followMode === 'follow'){
-    const granted = await requestOrientationPermission();
+    const granted = await StrikeDip.requestPermission();
     if(!granted){
       alert('コンパスを使うにはセンサーの利用許可が必要です。');
       return;
@@ -2178,76 +2178,7 @@ function strikeDipIcon(orientation, color){
 
 let points = []; // {id, lat, lng, label, memo, eventId, createdAt, marker}
 
-/* ---------------- コンパス/ジャイロ(走向傾斜) ---------------- */
-function requestOrientationPermission(){
-  return new Promise(resolve=>{
-    if(typeof DeviceOrientationEvent !== 'undefined' && typeof DeviceOrientationEvent.requestPermission === 'function'){
-      DeviceOrientationEvent.requestPermission().then(state=>resolve(state === 'granted')).catch(()=>resolve(false));
-    } else if(typeof DeviceOrientationEvent !== 'undefined'){
-      resolve(true); // iOS以外は明示的な許可リクエストが不要な場合が多い
-    } else {
-      resolve(false);
-    }
-  });
-}
-
-function readOrientationOnce(){
-  return new Promise((resolve, reject)=>{
-    let done = false;
-    const timeoutId = setTimeout(()=>{
-      if(done) return;
-      done = true;
-      window.removeEventListener('deviceorientationabsolute', onAbsolute);
-      window.removeEventListener('deviceorientation', onRelative);
-      reject(new Error('timeout'));
-    }, 4000);
-    function finish(data){
-      if(done) return;
-      done = true;
-      clearTimeout(timeoutId);
-      window.removeEventListener('deviceorientationabsolute', onAbsolute);
-      window.removeEventListener('deviceorientation', onRelative);
-      resolve(data);
-    }
-    function onAbsolute(e){
-      if(e.alpha == null) return;
-      finish({ alpha:e.alpha, beta:e.beta||0, gamma:e.gamma||0, absolute:true });
-    }
-    function onRelative(e){
-      if(typeof e.webkitCompassHeading === 'number'){
-        // iOS: webkitCompassHeadingは磁北基準の実測値なので、標準alphaの向きに変換して使う
-        finish({ alpha:(360 - e.webkitCompassHeading) % 360, beta:e.beta||0, gamma:e.gamma||0, absolute:true });
-      } else if(e.alpha != null){
-        finish({ alpha:e.alpha, beta:e.beta||0, gamma:e.gamma||0, absolute:!!e.absolute });
-      }
-    }
-    window.addEventListener('deviceorientationabsolute', onAbsolute);
-    window.addEventListener('deviceorientation', onRelative);
-  });
-}
-
-/* W3C DeviceOrientation仕様の回転行列(alpha/beta/gamma → 地表座標系)に基づき、
-   端末の画面表向きベクトル[0,0,1]を東(E)・北(N)・上(U)成分に変換する。
-   走向傾斜は「端末の背面を露頭面に当て、画面を上に向けた状態」を計測姿勢と想定。 */
-function computeOrientation(alpha, beta, gamma){
-  const d2r = Math.PI/180;
-  const a = alpha*d2r, b = beta*d2r, g = gamma*d2r;
-  const cA=Math.cos(a), sA=Math.sin(a);
-  const cB=Math.cos(b), sB=Math.sin(b);
-  const cG=Math.cos(g), sG=Math.sin(g);
-
-  const E = cG*sA*sB + cA*sG;
-  const N = sA*sG - cA*cG*sB;
-  const U = cB*cG;
-
-  const dip = Math.acos(Math.max(-1, Math.min(1, U))) * 180/Math.PI;
-  let frontAz = Math.atan2(E, N) * 180/Math.PI;
-  if(frontAz < 0) frontAz += 360;
-  const heading = (frontAz + 180) % 360;   // 端末背面が向く方位(一般的なコンパス方位)
-  const dipDirection = heading;             // 傾斜方向(下り方向)の方位
-  const strike = (dipDirection + 270) % 360; // 走向 = 傾斜方向 - 90°
-  return { heading, dip, dipDirection, strike };
-}
+/* 走向・傾斜のセンサー読み取りと計算は strikedip.js(StrikeDip.requestPermission / readOnce / compute)にある */
 
 function buildPointPopup(point){
   const wrap = document.createElement('div');
@@ -2303,13 +2234,13 @@ function buildPointPopup(point){
     measureBtn.disabled = true;
     measureBtn.textContent = '計測中…(数秒お待ちください)';
     try{
-      const granted = await requestOrientationPermission();
+      const granted = await StrikeDip.requestPermission();
       if(!granted){
         orientResultEl.innerHTML = '<div class="pp-orient-error">センサーの利用が許可されませんでした。</div>';
         return;
       }
-      const raw = await readOrientationOnce();
-      const reading = computeOrientation(raw.alpha, raw.beta, raw.gamma);
+      const raw = await StrikeDip.readOnce();
+      const reading = StrikeDip.compute(raw.alpha, raw.beta, raw.gamma);
       point.orientation = {
         heading: reading.heading, dip: reading.dip,
         dipDirection: reading.dipDirection, strike: reading.strike,
@@ -3190,7 +3121,7 @@ LEGEND_RENDERERS.hazard = function(body){
       ${depthRows(false)}
     </div>
     <div class="lg-block">
-      <div class="lg-title">津波浸水想定区域<span class="lg-unit">浸水深</span></div>
+      <div class="lg-title">津波浸水想定<span class="lg-unit">浸水深</span></div>
       ${depthRows(false)}
       <div class="lg-note">洪水(想定最大規模)と同じ浸水深の凡例が使われています。</div>
     </div>
