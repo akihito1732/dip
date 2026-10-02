@@ -850,7 +850,7 @@
       <div class="layer-group-title">ベースマップ(1つ選択)</div>
       <div class="geo-groups ov-chips" id="baseChips">
         <button class="geo-chip" data-basecat="all">すべて</button>
-        <button class="geo-chip" data-basecat="gsi">地理院地図<span class="ov-badge dot" data-basebadge="gsi"></span></button>
+        <button class="geo-chip" data-basecat="gsi">国土地理院<span class="ov-badge dot" data-basebadge="gsi"></span></button>
         <button class="geo-chip" data-basecat="google">Google<span class="ov-badge dot" data-basebadge="google"></span></button>
         <button class="geo-chip" data-basecat="osm">OSM<span class="ov-badge dot" data-basebadge="osm"></span></button>
       </div>
@@ -863,9 +863,9 @@
       </div>
       <div class="ov-section base-section" data-basesec="google">
         <div class="ov-sub2 base-sub">Google マップ</div>
-        <label class="base-option"><input type="radio" name="base" value="google_road" id="baseGoogleOpt"> 地図</label>
-        <label class="base-option"><input type="radio" name="base" value="google_hybrid"> 航空写真</label>
+        <label class="base-option"><input type="radio" name="base" value="google_road" id="baseGoogleOpt"> 標準</label>
         <label class="base-option"><input type="radio" name="base" value="google_terrain"> 地形</label>
+        <label class="base-option"><input type="radio" name="base" value="google_hybrid"> 航空写真</label>
       </div>
       <div class="ov-section base-section" data-basesec="osm">
         <div class="ov-sub2 base-sub">OpenStreetMap</div>
@@ -891,7 +891,6 @@
       </div>
 
       <div class="ov-section" data-ovsec="weather">
-        <div class="ov-sub">気象(気象庁)</div>
       <div class="overlay-item">
         <label class="overlay-row"><input type="checkbox" data-wx="nowc"> 雨雲の動き</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="75" data-wxop="nowc"><span data-wxopval="nowc">75%</span></div>
