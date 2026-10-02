@@ -863,9 +863,10 @@
       </div>
       <div class="ov-section base-section" data-basesec="google">
         <div class="ov-sub2 base-sub">Google マップ</div>
-        <label class="base-option"><input type="radio" name="base" value="google_road" id="baseGoogleOpt"> 地図</label>
-        <label class="base-option"><input type="radio" name="base" value="google_hybrid"> 航空写真</label>
+        <label class="base-option"><input type="radio" name="base" value="google_road" id="baseGoogleOpt"> 標準</label>
         <label class="base-option"><input type="radio" name="base" value="google_terrain"> 地形</label>
+        <label class="base-option"><input type="radio" name="base" value="google_hybrid"> 航空写真</label>
+        
       </div>
       <div class="ov-section base-section" data-basesec="osm">
         <div class="ov-sub2 base-sub">OpenStreetMap</div>
@@ -928,7 +929,7 @@
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-opacity="flood"><span data-opval="flood">60%</span></div>
       </div>
       <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-overlay="tsunami"> 津波浸水想定</label>
+        <label class="overlay-row"><input type="checkbox" data-overlay="tsunami"> 津波浸水想定区域</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-opacity="tsunami"><span data-opval="tsunami">60%</span></div>
       </div>
       <div class="overlay-item">
@@ -3240,7 +3241,7 @@ LEGEND_RENDERERS.hazard = function(body){
       ${depthRows(false)}
     </div>
     <div class="lg-block">
-      <div class="lg-title">津波浸水想定<span class="lg-unit">浸水深</span></div>
+      <div class="lg-title">津波浸水想定区域<span class="lg-unit">浸水深</span></div>
       ${depthRows(false)}
       <div class="lg-note">洪水(想定最大規模)と同じ浸水深の凡例が使われています。</div>
     </div>
