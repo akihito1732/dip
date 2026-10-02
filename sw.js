@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dip-v18';
+const CACHE_NAME = 'dip-v21';
 
 // アプリ本体(地図タイルは含めない。タイルは通信時のみ取得)
 const APP_SHELL = [
@@ -40,7 +40,8 @@ self.addEventListener('fetch', event => {
 
   // 地図タイル・外部APIは常にネットワークから取得する(容量と鮮度のため)。
   // 気象庁は時刻一覧が数分ごとに更新されるので、キャッシュすると古い時刻を返し続けてしまう。
-  const isLive = /tile|cyberjapandata|disaportaldata|gbank\.gsj\.jp|jma\.go\.jp|nominatim|router\.project-osrm/.test(url.href);
+  // Googleマップは規約上、地図データをキャッシュ(保存)してはいけないので必ず除外する。
+  const isLive = /tile|cyberjapandata|disaportaldata|gbank\.gsj\.jp|jma\.go\.jp|nominatim|router\.project-osrm|maps\.googleapis\.com|maps\.gstatic\.com|googleusercontent\.com|ggpht\.com|google\.com\/maps/.test(url.href);
   if (isLive) return;
 
   // アプリ本体はキャッシュ優先、なければネットワーク

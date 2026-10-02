@@ -148,6 +148,11 @@
   .map-fab.active{ border-color:var(--orange); }
   .map-fab.active svg{ color:var(--orange); }
   #locateBtn{ right:12px; bottom:14px; }
+  /* Googleマップ表示中:ロゴ(左下)と著作権表示(右下)を隠さないよう上へずらす */
+  #mapWrap.google-active .zoom-stack,
+  #mapWrap.google-active #locateBtn{ bottom:40px; }
+  #mapWrap.google-active .wx-bar{ bottom:50px; }
+  #mapWrap.google-active #mapAttrib{ bottom:26px; }
   #themeBtn{ right:12px; top:66px; }
   /* 今のモードを表すアイコンを出す(ダーク=月、ライト=太陽) */
   #themeBtn .i-sun{ display:none; }
@@ -429,6 +434,9 @@
   }
   .ov-sub.hide{ display:none; }
   .ov-sub2{ font-size:10.5px; font-weight:700; color:var(--ink-dim); margin:10px 6px 2px; letter-spacing:.04em; }
+  .base-sub{ margin:10px 6px 0; }
+  .base-sub.hide{ display:none; }
+  .ov-badge.dot{ min-width:8px; width:8px; height:8px; padding:0; border-radius:50%; }
   .overlay-item{ padding:7px 6px; border-radius:6px; }
   .overlay-item:hover{ background:var(--panel-2); }
   .overlay-row{ display:flex; align-items:center; gap:8px; font-size:12.5px; cursor:pointer; }
@@ -439,15 +447,6 @@
   .overlay-opacity input[type=range]{ flex:1; accent-color:var(--teal); }
   .overlay-opacity span{ font-family:'JetBrains Mono',monospace; font-size:10px; color:var(--ink-dim); width:28px; text-align:right; }
   .layer-note{ font-size:10.5px; color:var(--ink-dim); line-height:1.5; margin:10px 2px 6px; }
-  .gmap-key-row{ display:flex; gap:6px; margin:6px 0 2px; }
-  .gmap-key-row input{
-    flex:1; background:var(--panel-2); border:1px solid var(--line); color:var(--ink);
-    padding:6px 8px; border-radius:6px; font-size:11.5px; font-family:'JetBrains Mono',monospace;
-  }
-  .gmap-key-row button{
-    background:var(--panel-2); border:1px solid var(--orange); color:var(--yellow);
-    border-radius:6px; padding:0 10px; font-size:11px; font-weight:700; cursor:pointer;
-  }
 
   /* distance line label */
   .dist-label{
@@ -849,15 +848,30 @@
         </button>
       </div>
       <div class="layer-group-title">ベースマップ(1つ選択)</div>
-      <label class="base-option"><input type="radio" name="base" value="osm" checked> OpenStreetMap</label>
-      <label class="base-option"><input type="radio" name="base" value="gsi_std"> 地理院地図(標準)</label>
-      <label class="base-option"><input type="radio" name="base" value="gsi_pale"> 地理院地図(淡色)</label>
-      <label class="base-option"><input type="radio" name="base" value="gsi_photo"> 地理院地図(航空写真)</label>
-      <label class="base-option"><input type="radio" name="base" value="gsi_relief"> 地理院地図(陰影起伏)</label>
-      <label class="base-option"><input type="radio" name="base" value="google_road" id="baseGoogleOpt"> Google マップ(要APIキー)</label>
-      <div class="gmap-key-row" id="gmapKeyRow" style="display:none;">
-        <input type="text" id="gmapKeyInput" placeholder="Google Maps APIキーを入力">
-        <button id="gmapKeySave">適用</button>
+      <div class="geo-groups ov-chips" id="baseChips">
+        <button class="geo-chip" data-basecat="all">すべて</button>
+        <button class="geo-chip" data-basecat="gsi">地理院地図<span class="ov-badge dot" data-basebadge="gsi"></span></button>
+        <button class="geo-chip" data-basecat="google">Google<span class="ov-badge dot" data-basebadge="google"></span></button>
+        <button class="geo-chip" data-basecat="osm">OSM<span class="ov-badge dot" data-basebadge="osm"></span></button>
+      </div>
+      <div class="ov-section base-section" data-basesec="gsi">
+        <div class="ov-sub2 base-sub">地理院地図</div>
+        <label class="base-option"><input type="radio" name="base" value="gsi_std"> 標準</label>
+        <label class="base-option"><input type="radio" name="base" value="gsi_pale"> 淡色</label>
+        <label class="base-option"><input type="radio" name="base" value="gsi_photo"> 航空写真</label>
+        <label class="base-option"><input type="radio" name="base" value="gsi_relief"> 陰影起伏</label>
+      </div>
+      <div class="ov-section base-section" data-basesec="google">
+        <div class="ov-sub2 base-sub">Google マップ</div>
+        <label class="base-option"><input type="radio" name="base" value="google_road" id="baseGoogleOpt"> 地図</label>
+        <label class="base-option"><input type="radio" name="base" value="google_hybrid"> 航空写真</label>
+        <label class="base-option"><input type="radio" name="base" value="google_terrain"> 地形</label>
+      </div>
+      <div class="ov-section base-section" data-basesec="osm">
+        <div class="ov-sub2 base-sub">OpenStreetMap</div>
+        <label class="base-option"><input type="radio" name="base" value="osm" checked> 標準</label>
+        <label class="base-option"><input type="radio" name="base" value="osm_topo"> 地形(等高線)</label>
+        <label class="base-option"><input type="radio" name="base" value="osm_hot"> 人道支援(避難・給水などを強調)</label>
       </div>
 
       <div class="layer-group-title">重ねる情報(複数可)</div>
@@ -912,7 +926,7 @@
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-opacity="flood"><span data-opval="flood">60%</span></div>
       </div>
       <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-overlay="tsunami"> 津波浸水想定区域</label>
+        <label class="overlay-row"><input type="checkbox" data-overlay="tsunami"> 津波浸水想定</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-opacity="tsunami"><span data-opval="tsunami">60%</span></div>
       </div>
       <div class="overlay-item">
@@ -1100,8 +1114,17 @@ const map = L.map('map', { zoomControl:false, attributionControl:false }).setVie
 /* ---------------- ベースマップ ---------------- */
 const GSI_ATTR = '&copy; <a href="https://maps.gsi.go.jp/development/ichiran.html">国土地理院</a>';
 const baseLayerDefs = {
-  osm: () => L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  // OSM本体の利用ポリシーで指定されたURL(サブドメイン無し)を使う
+  osm: () => L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom:19, attribution:'&copy; OpenStreetMap contributors'
+  }),
+  // OpenTopoMap:OSMと標高データから作った等高線入りの地形図(CC-BY-SA)。最大ズーム17
+  osm_topo: () => L.tileLayer('https://tile.opentopomap.org/{z}/{x}/{y}.png', {
+    maxZoom:19, maxNativeZoom:17, attribution:'&copy; OpenStreetMap contributors, SRTM / &copy; OpenTopoMap (CC-BY-SA)'
+  }),
+  // 人道支援スタイル:HOTが作成し、OpenStreetMap Franceが配信
+  osm_hot: () => L.tileLayer('https://{s}.tile.openstreetmap.fr/hot/{z}/{x}/{y}.png', {
+    subdomains:'abc', maxZoom:19, attribution:'&copy; OpenStreetMap contributors / HOT / OSM France'
   }),
   gsi_std: () => L.tileLayer('https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png', {
     maxZoom:18, attribution:GSI_ATTR
@@ -1119,39 +1142,92 @@ const baseLayerDefs = {
 let currentBaseLayer = baseLayerDefs.osm().addTo(map);
 let currentBaseKey = 'osm';
 
-function switchBaseLayer(key){
+/* ---------------- Googleマップ ----------------
+   Maps JavaScript API を Leaflet 上で使う(Leaflet.GridLayer.GoogleMutant 0.15.0)。
+   無料枠は「地図の読み込み回数」で数えられるため、
+   - スクリプトは Googleマップを選んだときに初めて読み込む
+   - 一度作ったレイヤーは使い回す(切り替え直しても回数が増えない)
+   APIキーはページに含まれるので、Google Cloud側で
+   「ウェブサイトの制限(このサイトのURL)」と「APIの制限(Maps JavaScript API)」をかけて守る。 */
+const GOOGLE_MAPS_API_KEY = 'AIzaSyD0_WVFKyDHb9bF4WDoQyJl5sS9u0iO3Ns';
+const GOOGLE_MUTANT_URL = 'https://cdn.jsdelivr.net/npm/leaflet.gridlayer.googlemutant@0.15.0/dist/Leaflet.GoogleMutant.js';
+// 地図の種類ごとに1つずつレイヤーを作り、使い回す。
+// (読み込み回数は「その種類を最初に表示したとき」に1回ずつ数えられる)
+const GOOGLE_TYPES = { google_road:'roadmap', google_hybrid:'hybrid', google_terrain:'terrain' };
+const googleLayers = {};
+let googleLoading = null;
+let baseSwitchToken = 0;
+
+function loadScript(src){
+  return new Promise((resolve, reject)=>{
+    const sc = document.createElement('script');
+    sc.src = src; sc.async = true;
+    sc.onload = resolve;
+    sc.onerror = ()=>reject(new Error('load failed: ' + src));
+    document.head.appendChild(sc);
+  });
+}
+
+function loadGoogleMaps(){
+  if(googleLoading) return googleLoading;
+  googleLoading = new Promise((resolve, reject)=>{
+    window.__dipGmapsReady = resolve;
+    const url = 'https://maps.googleapis.com/maps/api/js?key=' + encodeURIComponent(GOOGLE_MAPS_API_KEY) +
+                '&v=weekly&language=ja&region=JP&loading=async&callback=__dipGmapsReady';
+    loadScript(url).catch(reject);
+    setTimeout(()=>reject(new Error('timeout')), 15000);
+  }).then(()=>loadScript(GOOGLE_MUTANT_URL))
+    .catch(err=>{ googleLoading = null; throw err; });
+  return googleLoading;
+}
+
+// キーの制限・課金設定・1日の上限などで使えないとき、Googleが呼び出す
+window.gm_authFailure = function(){
+  alert('Googleマップを表示できませんでした。\nしばらく時間をおくか、他の地図をお使いください。');
+  checkBaseRadio('osm');
+  switchBaseLayer('osm');
+};
+
+function checkBaseRadio(key){
+  const r = document.querySelector(`input[name=base][value="${key}"]`);
+  if(r) r.checked = true;
+  if(typeof updateBaseBadges === 'function') updateBaseBadges();
+}
+
+async function switchBaseLayer(key){
   if(key === currentBaseKey) return;
-  if(key === 'google_road'){
-    activateGoogleLayer();
-    return;
+  const prevKey = currentBaseKey;
+  const token = ++baseSwitchToken;   // 読み込み中に別の地図へ切り替えられた場合に備える
+  let next;
+
+  const isGoogle = key in GOOGLE_TYPES;
+  if(isGoogle){
+    try{
+      await loadGoogleMaps();
+    }catch(err){
+      if(token !== baseSwitchToken) return;
+      alert('Googleマップを読み込めませんでした。通信環境をご確認ください。');
+      checkBaseRadio(prevKey);
+      return;
+    }
+    if(token !== baseSwitchToken) return;
+    if(!googleLayers[key]) googleLayers[key] = L.gridLayer.googleMutant({ type:GOOGLE_TYPES[key], maxZoom:21 });
+    next = googleLayers[key];
+  } else {
+    next = baseLayerDefs[key]();
   }
-  if(currentBaseLayer){ map.removeLayer(currentBaseLayer); }
-  currentBaseLayer = baseLayerDefs[key]().addTo(map);
+
+  if(currentBaseLayer) map.removeLayer(currentBaseLayer);   // Googleのレイヤーは外しても使い回す
+  currentBaseLayer = next.addTo(map);
   currentBaseLayer.bringToBack();
   currentBaseKey = key;
+  // Googleのロゴと著作権表示を隠さないよう、地図下部のボタン類を少し上げる
+  document.getElementById('mapWrap').classList.toggle('google-active', isGoogle);
   updateAttrib();
 }
 
-/* Google マップは地理院/OSMのようなタイル直リンク配信がなく、Maps JavaScript API +
-   Leaflet.GridLayer.GoogleMutant のようなプラグイン連携が必要(要APIキー・要課金設定)。
-   ここではキー入力欄のみ用意し、実配線は次のステップで行う(誤って地図が消えないよう
-   ベースマップの切替自体はまだ実行しない)。 */
-function activateGoogleLayer(){
-  document.querySelector('input[name=base][value="'+currentBaseKey+'"]').checked = true;
-  document.getElementById('gmapKeyRow').style.display = 'flex';
-  document.getElementById('gmapKeyInput').focus();
-}
-document.getElementById('gmapKeySave').addEventListener('click', ()=>{
-  const v = document.getElementById('gmapKeyInput').value.trim();
-  if(v){
-    localStorage.setItem('dg_gmaps_key', v);
-    document.getElementById('gmapKeyRow').style.display = 'none';
-    alert('APIキーを保存しました。Google Maps表示の本実装は次のステップで対応します。');
-  }
-});
-
 document.querySelectorAll('input[name=base]').forEach(radio=>{
-  radio.addEventListener('change', e=>{ switchBaseLayer(e.target.value); });
+  radio.addEventListener('change', e=>{ switchBaseLayer(e.target.value); updateBaseBadges(); });
 });
 
 /* ---------------- 重ねるレイヤー(地質図・ハザード) ---------------- */
@@ -1354,6 +1430,44 @@ document.getElementById('themeBtn').addEventListener('click', ()=>{
   if(profileSamples) renderProfile();
 });
 applyTheme(currentTheme());
+
+try{ localStorage.removeItem('dg_gmaps_key'); }catch(e){}   // 旧版の入力欄で保存したキーの後片付け
+
+/* ---------------- ベースマップ:提供元の切り替え ----------------
+   重ねる情報と同じく、チップは一覧の表示を切り替えるだけ。
+   選択中の地図がどのチップに入っているかを丸印で示し、選んだチップは端末に記憶する。 */
+const BASE_CAT_KEY = 'dg_base_cat';
+let baseCat = 'all';
+try{ baseCat = localStorage.getItem(BASE_CAT_KEY) || 'all'; }catch(e){}
+
+function baseCatOf(key){
+  if(key.startsWith('gsi_')) return 'gsi';
+  if(key.startsWith('google_')) return 'google';
+  return 'osm';
+}
+function applyBaseCat(){
+  document.querySelectorAll('[data-basecat]').forEach(b=>b.classList.toggle('sel', b.dataset.basecat === baseCat));
+  document.querySelectorAll('[data-basesec]').forEach(sec=>{
+    sec.classList.toggle('show', baseCat === 'all' || sec.dataset.basesec === baseCat);
+    // 「すべて」のときだけ提供元の小見出しを出す(個別表示ではチップと重複するため)
+    sec.querySelector('.base-sub').classList.toggle('hide', baseCat !== 'all');
+  });
+}
+function updateBaseBadges(){
+  const checked = document.querySelector('input[name=base]:checked');
+  const cat = checked ? baseCatOf(checked.value) : null;
+  document.querySelectorAll('[data-basebadge]').forEach(b=>b.classList.toggle('on', b.dataset.basebadge === cat));
+}
+document.querySelectorAll('[data-basecat]').forEach(b=>{
+  b.addEventListener('click', ()=>{
+    baseCat = b.dataset.basecat;
+    try{ localStorage.setItem(BASE_CAT_KEY, baseCat); }catch(e){}
+    applyBaseCat();
+  });
+});
+if(!document.querySelector(`[data-basecat="${baseCat}"]`)) baseCat = 'all';
+applyBaseCat();
+updateBaseBadges();
 
 /* ---------------- 重ねる情報:カテゴリの切り替え ----------------
    チップは一覧の表示を切り替えるだけで、レイヤーのON/OFFには影響しない。
@@ -1629,8 +1743,11 @@ document.getElementById('zoomOutBtn').addEventListener('click', ()=>map.zoomOut(
 
 const BASE_ATTRIB = {
   osm:'© OpenStreetMap contributors',
+  osm_topo:'© OpenStreetMap contributors, SRTM / 地図スタイル © OpenTopoMap (CC-BY-SA)',
+  osm_hot:'© OpenStreetMap contributors / スタイル © Humanitarian OpenStreetMap Team / 配信 OpenStreetMap France',
   gsi_std:'© 国土地理院', gsi_pale:'© 国土地理院',
   gsi_photo:'© 国土地理院', gsi_relief:'© 国土地理院',
+  google_road:'', google_hybrid:'', google_terrain:'',   // Googleのロゴと著作権表示はGoogle自身が地図上に出す
 };
 const OVERLAY_ATTRIB = {
   geology:'© 産総研地質調査総合センター',
@@ -3121,7 +3238,7 @@ LEGEND_RENDERERS.hazard = function(body){
       ${depthRows(false)}
     </div>
     <div class="lg-block">
-      <div class="lg-title">津波浸水想定区域<span class="lg-unit">浸水深</span></div>
+      <div class="lg-title">津波浸水想定<span class="lg-unit">浸水深</span></div>
       ${depthRows(false)}
       <div class="lg-note">洪水(想定最大規模)と同じ浸水深の凡例が使われています。</div>
     </div>
