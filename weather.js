@@ -24,7 +24,7 @@
      maxAge  … 実況として遡る範囲(分) */
   var SOURCES = {
     nowc: {
-      label: '雨雲の動き',
+      label: '雨雲レーダー',
       times: [JMA + 'jmatile/data/nowc/targetTimes_N1.json',
               JMA + 'jmatile/data/nowc/targetTimes_N2.json'],
       element: 'hrpns',
@@ -40,7 +40,7 @@
     inund: riskSource('浸水キキクル', 'inund'),
     flood: riskSource('洪水キキクル', 'flood_mesh'),
     himawari: {
-      label: '気象衛星ひまわり(赤外)',
+      label: '衛星ひまわり',
       times: [JMA + 'himawari/data/satimg/targetTimes_jp.json'],
       element: null,
       url: function (f, z, x, y) {

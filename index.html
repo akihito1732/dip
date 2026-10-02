@@ -850,7 +850,7 @@
       <div class="layer-group-title">ベースマップ(1つ選択)</div>
       <div class="geo-groups ov-chips" id="baseChips">
         <button class="geo-chip" data-basecat="all">すべて</button>
-        <button class="geo-chip" data-basecat="gsi">国土地理院<span class="ov-badge dot" data-basebadge="gsi"></span></button>
+        <button class="geo-chip" data-basecat="gsi">地理院地図<span class="ov-badge dot" data-basebadge="gsi"></span></button>
         <button class="geo-chip" data-basecat="google">Google<span class="ov-badge dot" data-basebadge="google"></span></button>
         <button class="geo-chip" data-basecat="osm">OSM<span class="ov-badge dot" data-basebadge="osm"></span></button>
       </div>
@@ -863,9 +863,9 @@
       </div>
       <div class="ov-section base-section" data-basesec="google">
         <div class="ov-sub2 base-sub">Google マップ</div>
-        <label class="base-option"><input type="radio" name="base" value="google_road" id="baseGoogleOpt"> 標準</label>
-        <label class="base-option"><input type="radio" name="base" value="google_terrain"> 地形</label>
+        <label class="base-option"><input type="radio" name="base" value="google_road" id="baseGoogleOpt"> 地図</label>
         <label class="base-option"><input type="radio" name="base" value="google_hybrid"> 航空写真</label>
+        <label class="base-option"><input type="radio" name="base" value="google_terrain"> 地形</label>
       </div>
       <div class="ov-section base-section" data-basesec="osm">
         <div class="ov-sub2 base-sub">OpenStreetMap</div>
@@ -891,29 +891,32 @@
       </div>
 
       <div class="ov-section" data-ovsec="weather">
+        <div class="ov-sub">気象(気象庁)</div>
+        <div class="ov-sub2">雨雲</div>
       <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-wx="nowc"> 雨雲の動き</label>
+        <label class="overlay-row"><input type="checkbox" data-wx="nowc"> 雨雲レーダー</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="75" data-wxop="nowc"><span data-wxopval="nowc">75%</span></div>
       </div>
       <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-wx="rain"> 大雨キキクル</label>
+        <label class="overlay-row"><input type="checkbox" data-wx="himawari"> 衛星ひまわり</label>
+        <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-wxop="himawari"><span data-wxopval="himawari">60%</span></div>
+      </div>
+        <div class="ov-sub2">キキクル</div>
+      <div class="overlay-item">
+        <label class="overlay-row"><input type="checkbox" data-wx="rain"> 大雨</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="70" data-wxop="rain"><span data-wxopval="rain">70%</span></div>
       </div>
       <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-wx="land"> 土砂キキクル</label>
+        <label class="overlay-row"><input type="checkbox" data-wx="land"> 土砂</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="70" data-wxop="land"><span data-wxopval="land">70%</span></div>
       </div>
       <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-wx="inund"> 浸水キキクル</label>
+        <label class="overlay-row"><input type="checkbox" data-wx="inund"> 浸水</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="70" data-wxop="inund"><span data-wxopval="inund">70%</span></div>
       </div>
       <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-wx="flood"> 洪水キキクル</label>
+        <label class="overlay-row"><input type="checkbox" data-wx="flood"> 洪水</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="70" data-wxop="flood"><span data-wxopval="flood">70%</span></div>
-      </div>
-      <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-wx="himawari"> 気象衛星ひまわり(赤外)</label>
-        <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-wxop="himawari"><span data-wxopval="himawari">60%</span></div>
       </div>
       </div>
 
@@ -925,7 +928,7 @@
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-opacity="flood"><span data-opval="flood">60%</span></div>
       </div>
       <div class="overlay-item">
-        <label class="overlay-row"><input type="checkbox" data-overlay="tsunami"> 津波浸水想定区域</label>
+        <label class="overlay-row"><input type="checkbox" data-overlay="tsunami"> 津波浸水想定</label>
         <div class="overlay-opacity"><input type="range" min="0" max="100" value="60" data-opacity="tsunami"><span data-opval="tsunami">60%</span></div>
       </div>
       <div class="overlay-item">
@@ -3163,7 +3166,7 @@ function lgRows(rows){
 LEGEND_RENDERERS.weather = function(body){
   body.innerHTML = `
     <div class="lg-block">
-      <div class="lg-title">雨雲の動き<span class="lg-unit">降水強度(mm/h)</span></div>
+      <div class="lg-title">雨雲レーダー<span class="lg-unit">降水強度(mm/h)</span></div>
       ${lgRows(RAIN_LEGEND.map(([l,c])=>({label:l, color:c})))}
     </div>
     <div class="lg-block">
@@ -3177,7 +3180,7 @@ LEGEND_RENDERERS.weather = function(body){
       </div>
     </div>
     <div class="lg-block">
-      <div class="lg-title">気象衛星ひまわり(赤外画像)</div>
+      <div class="lg-title">衛星ひまわり(赤外画像)</div>
       <div class="lg-grad" style="background:linear-gradient(90deg,#1a1a1a,#f4f4f4)"></div>
       <div class="lg-grad-lab"><span>雲頂温度が高い(低い雲・晴天域)</span><span>低い(背の高い雲)</span></div>
       <div class="lg-note">赤外画像は雲の温度を明暗で表します。白く明るいほど雲頂が高く、発達した積乱雲などを示します。夜間でも観測できます。</div>
@@ -3237,9 +3240,7 @@ LEGEND_RENDERERS.hazard = function(body){
       ${depthRows(false)}
     </div>
     <div class="lg-block">
-      <div class="lg-title">津波浸水想定区域
-      
-      <span class="lg-unit">浸水深</span></div>
+      <div class="lg-title">津波浸水想定<span class="lg-unit">浸水深</span></div>
       ${depthRows(false)}
       <div class="lg-note">洪水(想定最大規模)と同じ浸水深の凡例が使われています。</div>
     </div>
