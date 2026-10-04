@@ -1087,6 +1087,7 @@
 <script src="profile.js"></script>
 <script src="geology.js"></script>
 <script src="weather.js"></script>
+<script src="info.js"></script>
 <script>
 /* ---------------- Utility ---------------- */
 function haversine(a, b){
@@ -1544,7 +1545,18 @@ function updateMeMarker(latlng, acc){
   }
 }
 
-if(navigator.geolocation){
+/* 位置情報は、利用者の同意があるときだけ取得する(Google Maps Platform の規約にも対応) */
+let geoWatchId = null;
+
+function startGeolocation(){
+  if(!navigator.geolocation){
+    gpsText.textContent = '位置情報に対応していません';
+    return;
+  }
+  if(geoWatchId !== null) return;   // すでに取得中
+  gpsDot.className = 'dot';
+  gpsText.textContent = '現在地取得中…';
+
   navigator.geolocation.getCurrentPosition(pos=>{
     currentLatLng = [pos.coords.latitude, pos.coords.longitude];
     currentAccuracy = pos.coords.accuracy;
@@ -1559,7 +1571,8 @@ if(navigator.geolocation){
     gpsText.textContent = '現在地を取得できません';
   }, { enableHighAccuracy:true, timeout:10000 });
 
-  navigator.geolocation.watchPosition(pos=>{
+  geoWatchId = navigator.geolocation.watchPosition(pos=>{
+    if(geoWatchId === null) return;   // 取り消し後に届いた分は使わない
     currentLatLng = [pos.coords.latitude, pos.coords.longitude];
     currentAccuracy = pos.coords.accuracy;
     currentGpsAltitude = (typeof pos.coords.altitude === 'number') ? pos.coords.altitude : null;
@@ -1572,8 +1585,28 @@ if(navigator.geolocation){
     gpsDot.className = 'dot bad';
     gpsText.textContent = 'GPS信号が弱いようです';
   }, { enableHighAccuracy:true, maximumAge:2000, timeout:15000 });
+}
+
+// 同意が取り消されたら、位置情報の取得をやめて現在地の表示も消す
+function stopGeolocation(){
+  if(geoWatchId !== null && navigator.geolocation) navigator.geolocation.clearWatch(geoWatchId);
+  geoWatchId = null;
+  currentLatLng = null; currentAccuracy = null; currentGpsAltitude = null;
+  if(meMarker){ map.removeLayer(meMarker); meMarker = null; }
+  if(meAccuracyCircle){ map.removeLayer(meAccuracyCircle); meAccuracyCircle = null; }
+  if(followMode !== 'off') setFollowMode('off');
+  gpsDot.className = 'dot';
+  gpsText.textContent = '位置情報を使っていません';
+}
+
+Info.onGrant = startGeolocation;
+Info.onRevoke = stopGeolocation;
+
+if(Info.consent.has()){
+  startGeolocation();
 } else {
-  gpsText.textContent = '位置情報に対応していません';
+  gpsText.textContent = '位置情報を使っていません';
+  Info.consent.show({ onAccept: startGeolocation });
 }
 
 /* ---------------- 現在地ボタン(追従 / コンパス連動) ---------------- */
@@ -1657,6 +1690,10 @@ function stopCompass(){
 }
 
 locateBtn.addEventListener('click', async ()=>{
+  if(!Info.consent.has()){
+    Info.consent.show({ onAccept: startGeolocation });
+    return;
+  }
   if(!currentLatLng){
     alert('現在地をまだ取得できていません。位置情報を許可してください。');
     return;
@@ -3089,8 +3126,20 @@ function renderHistoryRoot(){
         <span class="hc-label">${lg.label}</span>
         ${ARROW_SVG}
       </div>`;
+    }).join('') +
+    `<div class="drawer-section">情報</div>` +
+    Object.keys(Info.PAGES).map(key=>{
+      const pg = Info.PAGES[key];
+      return `<div class="hist-cat" data-info="${key}">
+        ${pg.icon}
+        <span class="hc-label">${pg.label}</span>
+        ${ARROW_SVG}
+      </div>`;
     }).join('');
 
+  historyPanel.querySelectorAll('[data-info]').forEach(el=>{
+    el.addEventListener('click', ()=>Info.open(el.dataset.info));
+  });
   historyPanel.querySelectorAll('[data-cat]').forEach(el=>{
     el.addEventListener('click', ()=>renderHistoryCat(el.dataset.cat));
   });
