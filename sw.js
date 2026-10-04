@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dip-v24';
+const CACHE_NAME = 'dip-v25';
 
 // アプリ本体(地図タイルは含めない。タイルは通信時のみ取得)
 const APP_SHELL = [
@@ -11,6 +11,7 @@ const APP_SHELL = [
   './geology.js',
   './geology-legend.json',
   './weather.js',
+  './info.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css',
