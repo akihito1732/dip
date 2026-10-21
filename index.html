@@ -2245,16 +2245,83 @@ function escapeHtml(s){
 const EVENT_COLORS = ['#ffd23f','#ff7a1a','#e6484f','#43c9b9','#5b8dee','#b06bd6','#7fc243','#f4f1ea'];
 const EVENT_SHAPES = ['pin','circle','square','triangle','diamond','star'];
 
-let events = [];        // {id, name, color, shape, kind:'point'|'track'}
-try{ events = JSON.parse(localStorage.getItem('dg_events')||'[]'); }catch(e){}
+/* ---------------- 同期の下準備(ID・更新日時・削除の記録) ----------------
+   複数端末で同期するときに、
+   ・どの端末で作っても重複しないID
+   ・どちらの編集が新しいかを判断する updatedAt
+   ・「削除した」ことを他の端末に伝える削除記録(deleted:true)
+   が必要になる。updatedAt は保存のたびに中身を前回と比べ、変わった記録にだけ付け直す。 */
+function newId(prefix){
+  let u = null;
+  try{ if(window.crypto && crypto.randomUUID) u = crypto.randomUUID(); }catch(e){}
+  if(!u) u = Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,10) + Math.random().toString(36).slice(2,10);
+  return prefix + '_' + u;
+}
+// 記録の中身を比較用の文字列にする(updatedAt・deleted は比較に含めない)
+function recordSig(rec){
+  const o = Object.assign({}, rec);
+  delete o.updatedAt; delete o.deleted;
+  return JSON.stringify(o);
+}
+// 保存対象の記録のうち、前回の保存から中身が変わったものだけ updatedAt を更新する
+function stampChanged(records, snap){
+  const now = Date.now();
+  records.forEach(r=>{
+    const sig = recordSig(r.rec);
+    if(snap.get(r.rec.id) !== sig){
+      snap.set(r.rec.id, sig);
+      r.src.updatedAt = now;
+    }
+    if(r.src.updatedAt == null) r.src.updatedAt = now;
+    r.rec.updatedAt = r.src.updatedAt;
+  });
+}
+// 削除記録を追加(同じIDの古い削除記録は置き換え)
+function addTombstones(list, ids){
+  const set = new Set(ids);
+  const now = Date.now();
+  const kept = list.filter(d=>!set.has(d.id));
+  set.forEach(id=>kept.push({ id, deleted:true, updatedAt:now }));
+  return kept;
+}
+
+let events = [];        // {id, name, color, shape, kind:'point'|'track', updatedAt}
+let deletedEvents = []; // {id, deleted:true, updatedAt}
+const eventSnap = new Map();
+function eventRecord(e){ return { id:e.id, name:e.name, color:e.color, shape:e.shape, kind:e.kind }; }
+(function loadEvents(){
+  let data = [];
+  try{ data = JSON.parse(localStorage.getItem('dg_events')||'[]'); }catch(e){}
+  if(!Array.isArray(data)) data = [];
+  data.forEach(d=>{
+    if(!d || !d.id) return;
+    if(d.deleted){ deletedEvents.push({ id:d.id, deleted:true, updatedAt:d.updatedAt||0 }); return; }
+    // 旧データには updatedAt がないので 0(=どの端末の編集よりも古い)とみなす
+    const ev = Object.assign({}, d, { updatedAt: d.updatedAt || 0 });
+    events.push(ev);
+    eventSnap.set(ev.id, recordSig(eventRecord(ev)));
+  });
+})();
 if(events.length === 0){
+  // 既定のイベントは全端末で同じIDなので、同期すると自然に1つにまとまる
   events = [
-    { id:'ev_default_point', name:'既定のポイント', color:'#ffd23f', shape:'pin',    kind:'point' },
-    { id:'ev_default_track', name:'既定のGPS記録', color:'#43c9b9', shape:'circle', kind:'track' },
+    { id:'ev_default_point', name:'既定のポイント', color:'#ffd23f', shape:'pin',    kind:'point', updatedAt:0 },
+    { id:'ev_default_track', name:'既定のGPS記録', color:'#43c9b9', shape:'circle', kind:'track', updatedAt:0 },
   ];
+  events.forEach(ev=>eventSnap.set(ev.id, recordSig(eventRecord(ev))));
+  deletedEvents = deletedEvents.filter(d=>!events.some(e=>e.id === d.id));
 }
 function saveEvents(){
-  try{ localStorage.setItem('dg_events', JSON.stringify(events)); }catch(e){}
+  const recs = events.map(e=>({ src:e, rec:eventRecord(e) }));
+  stampChanged(recs, eventSnap);
+  const data = recs.map(r=>r.rec).concat(deletedEvents);
+  try{ localStorage.setItem('dg_events', JSON.stringify(data)); }catch(e){}
+}
+function deleteEvent(id){
+  events = events.filter(e=>e.id !== id);
+  eventSnap.delete(id);
+  deletedEvents = addTombstones(deletedEvents, [id]);
+  saveEvents();
 }
 function eventsOf(kind){ return events.filter(e=>e.kind === kind); }
 function findEvent(id){ return events.find(e=>e.id === id); }
@@ -2331,7 +2398,9 @@ function strikeDipIcon(orientation, color){
 
 
 
-let points = []; // {id, lat, lng, label, memo, eventId, createdAt, marker}
+let points = []; // {id, lat, lng, label, memo, eventId, createdAt, updatedAt, marker}
+let deletedPoints = [];   // {id, deleted:true, updatedAt}
+const pointSnap = new Map();
 
 /* 走向・傾斜のセンサー読み取りと計算は strikedip.js(StrikeDip.requestPermission / readOnce / compute)にある */
 
@@ -2423,9 +2492,7 @@ function buildPointPopup(point){
   });
   wrap.querySelector('.pp-delete').addEventListener('click', ()=>{
     if(!confirm('このポイントを削除しますか?')) return;
-    map.removeLayer(point.marker);
-    points = points.filter(p=>p.id !== point.id);
-    savePoints();
+    deletePoints([point.id]);
     renderPointsList();
   });
   return wrap;
@@ -2464,7 +2531,7 @@ function handlePointClick(latlng){
   // ポップアップが開いているときのタップは「閉じる」だけにする。
   // Leafletは閉じてもmap._popupを残すため、実際に開いているかはisOpen()で判定する。
   if(map._popup && map._popup.isOpen()){ map.closePopup(); return; }
-  const point = { id:'p'+Date.now()+Math.floor(Math.random()*1000), lat:latlng.lat, lng:latlng.lng,
+  const point = { id:newId('p'), lat:latlng.lat, lng:latlng.lng,
                   label:'', memo:'', eventId: currentPointEventId || defaultEventId('point'), createdAt:Date.now() };
   createPointMarker(point);
   points.push(point);
@@ -2557,23 +2624,44 @@ function elevationHtml(point){
   return rows.join('');
 }
 
+function pointStoreRecord(p){
+  return { id:p.id, lat:p.lat, lng:p.lng, label:p.label, memo:p.memo,
+           eventId:p.eventId||null, createdAt:p.createdAt, orientation:p.orientation||null,
+           elevation:p.elevation!=null?p.elevation:null,
+           elevationSource:p.elevationSource||null,
+           gpsAltitude:p.gpsAltitude!=null?p.gpsAltitude:null,
+           geology:p.geology||null };
+}
 function savePoints(){
-  const data = points.map(p=>({ id:p.id, lat:p.lat, lng:p.lng, label:p.label, memo:p.memo,
-                                eventId:p.eventId||null, createdAt:p.createdAt, orientation:p.orientation||null,
-                                elevation:p.elevation!=null?p.elevation:null,
-                                elevationSource:p.elevationSource||null,
-                                gpsAltitude:p.gpsAltitude!=null?p.gpsAltitude:null,
-                                geology:p.geology||null }));
+  const recs = points.map(p=>({ src:p, rec:pointStoreRecord(p) }));
+  stampChanged(recs, pointSnap);
+  const data = recs.map(r=>r.rec).concat(deletedPoints);
   try{ localStorage.setItem('dg_points', JSON.stringify(data)); }catch(e){}
+}
+// ポイントを削除する(地図から消し、他の端末に伝えるための削除記録を残す)
+function deletePoints(ids){
+  const set = new Set(ids);
+  points.forEach(p=>{ if(set.has(p.id) && p.marker) map.removeLayer(p.marker); });
+  points = points.filter(p=>!set.has(p.id));
+  set.forEach(id=>pointSnap.delete(id));
+  deletedPoints = addTombstones(deletedPoints, [...set]);
+  savePoints();
 }
 function loadPoints(){
   let data = [];
   try{ data = JSON.parse(localStorage.getItem('dg_points')||'[]'); }catch(e){}
+  if(!Array.isArray(data)) data = [];
+  let migrated = false;
   data.forEach(d=>{
+    if(!d || !d.id) return;
+    if(d.deleted){ deletedPoints.push({ id:d.id, deleted:true, updatedAt:d.updatedAt||0 }); return; }
     const point = Object.assign({}, d);
+    if(!point.updatedAt){ point.updatedAt = point.createdAt || Date.now(); migrated = true; }
+    pointSnap.set(point.id, recordSig(pointStoreRecord(point)));
     createPointMarker(point);
     points.push(point);
   });
+  if(migrated) savePoints();   // 旧形式のデータに updatedAt を書き足して保存し直す
   renderPointsList();
 }
 
@@ -2736,7 +2824,7 @@ function renderEventEditor(host, kind){
     const name = document.getElementById('evName').value.trim();
     if(!name){ alert('イベント名を入力してください。'); return; }
     if(ev.isNew){
-      const created = { id:'ev'+Date.now(), name, color:ev.color, shape:ev.shape, kind };
+      const created = { id:newId('ev'), name, color:ev.color, shape:ev.shape, kind };
       events.push(created);
       if(kind === 'point') currentPointEventId = created.id;
       else currentTrackEventId = created.id;
@@ -2761,9 +2849,7 @@ function renderEventEditor(host, kind){
       if(eventsOf(kind).length <= 1){ alert('イベントは1つ以上必要です。'); return; }
       if(!confirm(`「${ev.name}」を削除しますか?中の記録も削除されます。`)) return;
       if(kind === 'point'){
-        points.filter(p=>(p.eventId||defaultEventId('point')) === ev.id).forEach(p=>map.removeLayer(p.marker));
-        points = points.filter(p=>(p.eventId||defaultEventId('point')) !== ev.id);
-        savePoints();
+        deletePoints(points.filter(p=>(p.eventId||defaultEventId('point')) === ev.id).map(p=>p.id));
         pointsViewEvent = null;
         currentPointEventId = null;
       } else {
@@ -2771,8 +2857,7 @@ function renderEventEditor(host, kind){
         saveHistory();
         currentTrackEventId = null;
       }
-      events = events.filter(e=>e.id !== ev.id);
-      saveEvents();
+      deleteEvent(ev.id);
       editingEvent = null;
       if(kind === 'point'){ currentPointEventId = defaultEventId('point'); renderPointsView(); }
       else { currentTrackEventId = defaultEventId('track'); renderTrackEventOptions(); renderTrackView(); }
@@ -2796,7 +2881,7 @@ function addPointAtCurrentLocation(){
     return;
   }
   const point = {
-    id:'p'+Date.now()+Math.floor(Math.random()*1000),
+    id:newId('p'),
     lat:currentLatLng[0], lng:currentLatLng[1],
     label:'', memo:'',
     eventId: pointsViewEvent || currentPointEventId || defaultEventId('point'),
@@ -3665,7 +3750,7 @@ function renderHistoryItems(cat, evId, title, backLabel){
     btn.addEventListener('click', e=>{
       e.stopPropagation();
       const p = points.find(pt=>pt.id === btn.dataset.delPoint);
-      if(p){ map.removeLayer(p.marker); points = points.filter(pt=>pt.id !== p.id); savePoints(); }
+      if(p) deletePoints([p.id]);
       renderPointsView();
       refresh();
     });
@@ -3676,10 +3761,7 @@ function renderHistoryItems(cat, evId, title, backLabel){
     clearEl.addEventListener('click', ()=>{
       if(!confirm('この一覧の記録をすべて消去しますか?')) return;
       if(cat === 'points'){
-        items.forEach(p=>{ map.removeLayer(p.marker); });
-        const ids = new Set(items.map(p=>p.id));
-        points = points.filter(p=>!ids.has(p.id));
-        savePoints();
+        deletePoints(items.map(p=>p.id));
         renderPointsView();
       } else {
         const ids = new Set(items.map(x=>x.id));
