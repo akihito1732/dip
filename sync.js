@@ -871,7 +871,7 @@ function renderEventSection(el, ev){
     <div class="ev-sync">
       <div class="ev-sync-title">同期・共有<span class="ev-sync-on">同期中</span></div>
       ${!user ? '<div class="ev-sync-note">ログアウト中のため、同期を止めています。</div>' : ''}
-      <div class="ev-sync-note">${owner ? 'あなたが作成したイベントです。' : `作成者: ${escapeHtml(names[ev.ownerId] || '')} さん。名前や色の変更、招待は作成者だけができます。`}</div>
+      <div class="ev-sync-note">${owner ? '　あなたが作成したイベントです。' : `作成者: ${escapeHtml(names[ev.ownerId] || '')} さん。名前や色の変更、招待は作成者だけができます。`}</div>
       <div class="ev-members">
         ${members.map(uid=>`
           <div class="ev-member">
@@ -881,7 +881,7 @@ function renderEventSection(el, ev){
           </div>`).join('')}
       </div>
       ${owner && user ? `<button class="btn btn-primary ev-sync-btn" id="evInvite">メンバーを招待</button>
-        <div class="ev-sync-note">招待リンクは${INVITE_DAYS}日間有効です。リンクを知っている人は誰でも参加できるので、送る相手に気をつけてください。</div>` : ''}
+        <div class="ev-sync-note">　招待リンクは${INVITE_DAYS}日間有効です。リンクを知っている人は<br>誰でも参加できるので、送る相手に気をつけてください。</div>` : ''}
       ${!owner && user ? `<button class="btn btn-ghost ev-sync-btn" id="evLeave">このイベントから抜ける</button>` : ''}
     </div>`;
   const inv = el.querySelector('#evInvite');
