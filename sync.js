@@ -16,12 +16,12 @@ const FIREBASE_VERSION = '13.0.0';
 const FB_BASE = `https://www.gstatic.com/firebasejs/${FIREBASE_VERSION}/`;
 
 const firebaseConfig = {
-  apiKey: 'AIzaSyBUgEJuTATyhclImX70b5i5vC16wQe4zzU',
-  authDomain: 'dio-sync.firebaseapp.com',
-  projectId: 'dio-sync',
-  storageBucket: 'dio-sync.firebasestorage.app',
-  messagingSenderId: '977109200700',
-  appId: '1:977109200700:web:25b7bdd8e0f1478aad7839'
+  apiKey: 'AIzaSyA7uun2oDn3d3_46l5BjTaMMQ0Uozr76tw',
+  authDomain: 'dip-sync.firebaseapp.com',
+  projectId: 'dip-sync',
+  storageBucket: 'dip-sync.firebasestorage.app',
+  messagingSenderId: '219108004157',
+  appId: '1:219108004157:web:89230828bb30876ba23554'
 };
 
 const INVITE_DAYS = 7;
