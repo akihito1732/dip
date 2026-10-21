@@ -68,6 +68,7 @@ const DipSync = {
   },
   signIn, signOut: doSignOut,
   enableSync, invite, leave, removeMember,
+  deleteCloudData,
   schedulePush,
   renderSyncBar, renderEventSection,
 };
@@ -78,6 +79,7 @@ init();
 
 async function init(){
   pendingJoin = new URLSearchParams(location.search).get('join');
+  pruneTombstones();
   try{
     const [appMod, authMod, fsMod] = await Promise.all([
       import(FB_BASE + 'firebase-app.js'),
@@ -211,9 +213,9 @@ function watchPoints(evId){
 function applyRemoteEvent(id, d){
   const local = findEvent(id);
   if(d.deleted){
-    if(local){
+    if(local && local.synced){
       if(d.ownerId === user.uid) syncRemoveEventLocal(id);   // 自分が別の端末で削除した
-      else detachEventLocal(local);                          // 作成者が削除した → 自分の端末には残す
+      else finalSyncThenDetach(local);                       // 作成者が削除した → 自分の端末には残す
     }
     S.pushedEv[id] = d.updatedAt;
     return;
@@ -298,6 +300,25 @@ function applyRemotePoint(evId, id, d){
   return true;
 }
 
+// 作成者が削除したイベントは、切り離す前にポイントを一度だけ取り直す。
+// (イベントの削除とポイントの消去は別々に届くので、順番が前後しても消去を取りこぼさないように)
+const finalizing = new Set();
+async function finalSyncThenDetach(ev){
+  if(finalizing.has(ev.id)) return;
+  finalizing.add(ev.id);
+  try{
+    const snap = await F.getDocsFromServer(F.collection(db, 'events', ev.id, 'points'));
+    snap.docs.forEach(d=>applyRemotePoint(ev.id, d.id, d.data()));
+  }catch(e){
+    console.warn('[dip sync] final sync', e);
+  }
+  const cur = findEvent(ev.id);
+  if(cur && cur.synced) detachEventLocal(cur);
+  finalizing.delete(ev.id);
+  saveEvents(); savePoints(); saveState();
+  rerender();
+}
+
 function detachEventLocal(ev){
   ev.synced = false;
   delete ev.ownerId; delete ev.memberIds; delete ev.memberNames;
@@ -380,6 +401,37 @@ function pushAll(){
 
   saveState();
   if(touchedLocal) savePoints();
+  pruneTombstones();
+}
+
+/* ---------------- 削除記録の整理 ----------------
+   削除記録(deleted:true)は「消したことを他の端末に伝える」ためだけにある。
+   ・同期していない(一度もクラウドに送っていない)ポイント・イベントの削除記録 → 不要
+   ・クラウドに送り終えた削除記録 → 以後はクラウド側の記録が他の端末に伝えるので不要
+   残すのは「同期中に消して、まだ送れていないもの」だけ。
+   (送信は Firestore の端末内キャッシュに積まれた時点で、アプリを閉じても失われない) */
+function pruneTombstones(){
+  const syncedIds = syncedEventIds();
+  const nP = deletedPoints.length, nE = deletedEvents.length;
+  deletedPoints = deletedPoints.filter(t=>{
+    const last = S.pushed[t.id];
+    return !!last && last.u < t.updatedAt;
+  });
+  deletedEvents = deletedEvents.filter(t=>{
+    const sent = S.pushedEv[t.id];
+    return !!t.synced && sent != null && sent < t.updatedAt;
+  });
+  // 送信済みの記録の控えも、同期をやめたイベントの分は不要
+  let nS = 0;
+  const live = new Set(points.map(p=>p.id));
+  Object.keys(S.pushed).forEach(id=>{
+    if(!live.has(id) && !syncedIds.has(S.pushed[id].ev) && !deletedPoints.some(t=>t.id === id)){
+      delete S.pushed[id]; nS++;
+    }
+  });
+  if(deletedPoints.length !== nP) savePoints();
+  if(deletedEvents.length !== nE) saveEvents();
+  if(nS) saveState();
 }
 
 function pointData(p){
@@ -479,6 +531,7 @@ async function invite(evId){
     alert('招待リンクを作れませんでした。');
     return;
   }
+  deleteMyInvites(false).catch(err=>console.warn('[dip sync] invite cleanup', err));
   const url = location.origin + location.pathname + '?join=' + code;
   const text = `dip のイベント「${ev.name}」への招待です(${INVITE_DAYS}日間有効)`;
   if(navigator.share){
@@ -486,6 +539,18 @@ async function invite(evId){
     catch(e){ if(e && e.name === 'AbortError') return; }
   }
   showInviteLink(url);
+}
+
+// 自分が作った招待のうち、期限切れのもの(または all のときはすべて)をクラウドから消す
+async function deleteMyInvites(all){
+  const snap = await F.getDocsFromServer(F.query(F.collection(db, 'invites'), F.where('createdBy', '==', user.uid)));
+  const now = Date.now();
+  const targets = snap.docs.filter(d=>{
+    const exp = d.data().expiresAt;
+    return all || !exp || !exp.toMillis || exp.toMillis() < now;
+  });
+  await Promise.all(targets.map(d=>F.deleteDoc(F.doc(db, 'invites', d.id))));
+  return targets.length;
 }
 
 function showInviteLink(url){
@@ -622,6 +687,113 @@ async function removeMember(evId, uid){
   rerender();
 }
 
+/* ---------------- クラウドのデータの削除(アカウントごと) ----------------
+   ・自分が記録したポイント:内容を消去(削除の印だけ残し、メンバーの端末からも消えるようにする)
+   ・自分が作成したイベント:削除(名前とメンバー名も消去)。メンバーの同期も止まる
+   ・参加しているイベント:抜ける
+   ・自分が作った招待:削除
+   ・dip のアカウント(Firebase のログイン情報):削除
+   この端末の記録は残し、同期していない状態に戻す。 */
+let deleting = false;
+async function deleteCloudData(){
+  if(deleting || !user || !F) return;
+  if(!navigator.onLine){
+    alert('クラウドのデータを削除するには通信が必要です。電波のある場所でお試しください。');
+    return;
+  }
+  if(!confirm('クラウドのデータとdipのアカウントを削除しますか?\n\n' +
+              '・あなたが記録したポイントの内容をクラウドから消去します\n' +
+              '・あなたが作成したイベントは削除され、メンバーの同期も止まります\n' +
+              '・参加しているイベントからは抜けます\n' +
+              '・作成した招待リンクは使えなくなります\n' +
+              '・dipのアカウント(Googleアカウントとの連携)を削除します\n\n' +
+              'この端末の記録は残ります(同期していない状態に戻ります)。この操作は元に戻せません。')) return;
+
+  deleting = true;
+  const me = user.uid;
+  // アカウントの削除には直前のログインが必要なので、最初に確認する(ボタンを押した流れで開くため)
+  try{
+    await F.reauthenticateWithPopup(user, new F.GoogleAuthProvider());
+  }catch(err){
+    deleting = false;
+    const code = err && err.code || '';
+    if(code !== 'auth/popup-closed-by-user' && code !== 'auth/cancelled-popup-request'){
+      alert('本人確認ができなかったため、削除を中止しました。\n' + (err && err.message ? err.message : code));
+    }
+    return;
+  }
+
+  const progress = showProgress('クラウドのデータを削除しています…');
+  try{
+    stopListeners();
+    clearTimeout(pushTimer);
+    const evSnap = await F.getDocsFromServer(F.query(F.collection(db, 'events'), F.where('memberIds', 'array-contains', me)));
+
+    // 1) 自分が記録したポイントの内容を消去する
+    progress('ポイントの内容を消去しています…');
+    const pointWrites = [];
+    for(const d of evSnap.docs){
+      const ps = await F.getDocsFromServer(F.query(F.collection(db, 'events', d.id, 'points'), F.where('authorId', '==', me)));
+      ps.docs.forEach(pd=>{
+        const old = pd.data();
+        if(old.deleted && !old.authorName) return;   // 消去済み
+        pointWrites.push(F.setDoc(F.doc(db, 'events', d.id, 'points', pd.id),
+          Object.assign(tombstoneData({ createdAt:old.createdAt, updatedAt:Date.now() }, me, ''), { authorName:'' })));
+      });
+    }
+    await Promise.all(pointWrites);
+
+    // 2) 作成したイベントは削除、参加しているイベントからは抜ける
+    progress('イベントを整理しています…');
+    await Promise.all(evSnap.docs.map(d=>{
+      const ev = d.data();
+      const ref = F.doc(db, 'events', d.id);
+      if(ev.ownerId === me){
+        return F.updateDoc(ref, { deleted:true, name:'(削除済み)', memberNames:{}, updatedAt:Date.now() });
+      }
+      return F.updateDoc(ref, { memberIds:F.arrayRemove(me), ['memberNames.' + me]:F.deleteField() });
+    }));
+
+    // 3) 作成した招待をすべて削除
+    progress('招待リンクを削除しています…');
+    await deleteMyInvites(true);
+
+    // 4) アカウントを削除(ログアウトも兼ねる)
+    progress('アカウントを削除しています…');
+    await F.deleteUser(user);
+  }catch(err){
+    progress(null);
+    deleting = false;
+    reportError(err);
+    alert('削除の途中でエラーが起きました。通信できる場所で、もう一度「クラウドのデータを削除」を押してください(途中まで削除した分はそのままで大丈夫です)。\n' +
+          (err && err.message ? err.message : ''));
+    if(user) startListeners();
+    return;
+  }
+
+  // この端末:同期を外して、記録は端末の中に残す
+  events.forEach(ev=>{ if(ev.synced) detachEventLocal(ev); });
+  points.forEach(p=>{ delete p.authorId; delete p.authorName; syncMarkClean('point', p); });
+  S.uid = null; S.pushed = {}; S.pushedEv = {};
+  saveState();
+  pruneTombstones();
+  saveEvents(); savePoints();
+  progress(null);
+  deleting = false;
+  rerender();
+  alert('クラウドのデータとdipのアカウントを削除しました。\nこの端末の記録は残っています。');
+}
+
+function showProgress(text){
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  back.innerHTML = `<div class="modal"><div class="modal-title">削除しています</div><div class="modal-sub" id="delProgress"></div></div>`;
+  document.body.appendChild(back);
+  const label = back.querySelector('#delProgress');
+  label.textContent = text;
+  return t=>{ if(t == null) back.remove(); else label.textContent = t; };
+}
+
 /* ---------------- 画面 ---------------- */
 function rerender(){
   try{ renderPointsView(); }catch(e){}
@@ -665,10 +837,12 @@ function renderSyncBar(el){
       <div class="sync-text">
         <div class="sync-user">${escapeHtml(myName())} でログイン中</div>
         <div class="sync-status ${s.cls}">${escapeHtml(s.text)}</div>
+        <button class="sync-link" id="syncDelete">クラウドのデータを削除</button>
       </div>
       <button class="btn btn-ghost sync-btn" id="syncLogout">ログアウト</button>
     </div>`;
   el.querySelector('#syncLogout').addEventListener('click', doSignOut);
+  el.querySelector('#syncDelete').addEventListener('click', deleteCloudData);
 }
 
 function renderEventSection(el, ev){

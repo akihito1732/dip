@@ -120,9 +120,10 @@ service cloud.firestore {
     }
 
     match /invites/{code} {
-      // コードを知っている人だけが1件ずつ読める(一覧で探すことはできない)
+      // コードを知っている人だけが1件ずつ読める(他人の招待を一覧で探すことはできない)
       allow get: if signedIn();
-      allow list: if false;
+      // 自分が作った招待だけは一覧できる(期限切れの片付けと、データ削除のため)
+      allow list: if signedIn() && resource.data.createdBy == me();
 
       // 発行:イベントの作成者だけ。推測されないよう長いコードにする
       allow create: if signedIn()
