@@ -1,0 +1,140 @@
+rules_version = '2';
+
+// dip の Cloud Firestore セキュリティルール
+//
+// データの形:
+//   events/{eventId}                  イベント(名前・色・形・作成者・メンバー)
+//   events/{eventId}/points/{pointId} そのイベントのポイント
+//   invites/{code}                    招待コード(イベントへの参加に使う)
+//
+// 権限の方針:
+//   ・イベントとポイントは、そのイベントのメンバーだけが読める
+//   ・ポイントは誰でも追加できるが、編集・削除できるのは記録した本人だけ
+//   ・イベントの名前や色の変更、メンバーを外す操作、招待の発行は作成者だけ
+//   ・削除は「deleted: true」を立てる方式なので、本当の削除はさせない
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function signedIn() { return request.auth != null; }
+    function me() { return request.auth.uid; }
+    function eventData(eventId) {
+      return get(/databases/$(database)/documents/events/$(eventId)).data;
+    }
+    function isMember(eventId) {
+      return signedIn() && me() in eventData(eventId).memberIds;
+    }
+    // 更新で変わった項目
+    function changedKeys() {
+      return request.resource.data.diff(resource.data).affectedKeys();
+    }
+
+    function validEvent(d) {
+      return d.keys().hasOnly(['name', 'color', 'shape', 'kind', 'ownerId', 'memberIds', 'memberNames',
+                               'joinCode', 'createdAt', 'updatedAt', 'deleted'])
+        && d.name is string && d.name.size() > 0 && d.name.size() <= 100
+        && d.color is string && d.color.size() <= 20
+        && d.shape is string && d.shape.size() <= 20
+        && d.kind == 'point'
+        && d.memberIds is list && d.memberIds.size() <= 100
+        && d.memberNames is map
+        && d.updatedAt is int
+        && (!('deleted' in d) || d.deleted is bool);
+    }
+
+    function validPoint(d) {
+      return d.keys().hasOnly(['lat', 'lng', 'label', 'memo', 'createdAt', 'updatedAt', 'deleted',
+                               'orientation', 'elevation', 'elevationSource', 'gpsAltitude', 'geology',
+                               'authorId', 'authorName'])
+        && d.lat is number && d.lat >= -90 && d.lat <= 90
+        && d.lng is number && d.lng >= -180 && d.lng <= 180
+        && d.label is string && d.label.size() <= 200
+        && d.memo is string && d.memo.size() <= 5000
+        && d.updatedAt is int
+        && d.authorName is string && d.authorName.size() <= 100
+        && (!('deleted' in d) || d.deleted is bool);
+    }
+
+    // ---------------- イベント ----------------
+    match /events/{eventId} {
+      allow read: if signedIn() && me() in resource.data.memberIds;
+
+      // 作成:作成者は自分、最初のメンバーは自分だけ
+      allow create: if signedIn()
+        && request.resource.data.ownerId == me()
+        && request.resource.data.memberIds == [me()]
+        && validEvent(request.resource.data);
+
+      // 作成者による変更:名前・色・形・削除、メンバーを外す(勝手に人を加えることはできない)
+      allow update: if signedIn()
+        && resource.data.ownerId == me()
+        && request.resource.data.ownerId == me()
+        && me() in request.resource.data.memberIds
+        && request.resource.data.memberIds.toSet().difference(resource.data.memberIds.toSet()).size() == 0
+        && validEvent(request.resource.data);
+
+      // 参加:有効な招待コードを持つ人が、自分だけをメンバーに加える
+      allow update: if signedIn()
+        && !(me() in resource.data.memberIds)
+        && changedKeys().hasOnly(['memberIds', 'memberNames', 'joinCode'])
+        && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().union([me()].toSet())
+        && request.resource.data.memberNames.diff(resource.data.memberNames).affectedKeys().hasOnly([me()])
+        && validInvite(request.resource.data.joinCode, eventId);
+
+      // 退出:作成者以外のメンバーが、自分だけをメンバーから外す
+      allow update: if signedIn()
+        && resource.data.ownerId != me()
+        && me() in resource.data.memberIds
+        && changedKeys().hasOnly(['memberIds', 'memberNames'])
+        && request.resource.data.memberIds.toSet() == resource.data.memberIds.toSet().difference([me()].toSet())
+        && request.resource.data.memberNames.diff(resource.data.memberNames).affectedKeys().hasOnly([me()]);
+
+      allow delete: if false;
+
+      // ---------------- ポイント ----------------
+      match /points/{pointId} {
+        allow read: if isMember(eventId);
+
+        // 追加:メンバーなら誰でも。記録者は必ず自分
+        allow create: if isMember(eventId)
+          && request.resource.data.authorId == me()
+          && validPoint(request.resource.data);
+
+        // 編集・削除(deleted を立てる):記録した本人だけ
+        allow update: if isMember(eventId)
+          && resource.data.authorId == me()
+          && request.resource.data.authorId == me()
+          && validPoint(request.resource.data);
+
+        allow delete: if false;
+      }
+    }
+
+    // ---------------- 招待コード ----------------
+    function validInvite(code, eventId) {
+      let inv = get(/databases/$(database)/documents/invites/$(code)).data;
+      return code is string
+        && exists(/databases/$(database)/documents/invites/$(code))
+        && inv.eventId == eventId
+        && inv.expiresAt > request.time;
+    }
+
+    match /invites/{code} {
+      // コードを知っている人だけが1件ずつ読める(一覧で探すことはできない)
+      allow get: if signedIn();
+      allow list: if false;
+
+      // 発行:イベントの作成者だけ。推測されないよう長いコードにする
+      allow create: if signedIn()
+        && code.size() >= 20
+        && request.resource.data.keys().hasOnly(['eventId', 'eventName', 'createdBy', 'createdByName', 'createdAt', 'expiresAt'])
+        && request.resource.data.createdBy == me()
+        && eventData(request.resource.data.eventId).ownerId == me()
+        && request.resource.data.expiresAt is timestamp
+        && request.resource.data.expiresAt < request.time + duration.value(30, 'd');
+
+      allow update: if false;
+      allow delete: if signedIn() && resource.data.createdBy == me();
+    }
+  }
+}
