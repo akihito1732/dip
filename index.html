@@ -589,6 +589,8 @@
   .em-remove{ background:none; border:1px solid var(--line); color:var(--red); border-radius:6px; padding:3px 9px; font-size:11px; cursor:pointer; font-family:inherit; }
   .point-popup .pp-author{ font-size:11px; color:var(--ink-dim); margin-bottom:6px; line-height:1.45; }
   .pi-author{ font-size:10.5px; color:var(--ink-dim); margin-top:3px; }
+  /* 同期の画面では、見出しの区切り線を付けない */
+  #evSyncSection .ev-sync{ margin-top:4px; padding-top:0; border-top:none; }
 
   /* ---- 標高断面図 ---- */
   .prof-status{ font-size:12px; color:var(--ink-dim); padding:12px 2px; }
@@ -698,7 +700,7 @@
   }
   .ev-row:hover{ border-color:var(--ink-dim); }
   .ev-swatch{ flex:none; width:22px; height:22px; display:flex; align-items:center; justify-content:center; }
-  .ev-row .ev-name{ flex:1; font-size:13px; font-weight:700; }
+  .ev-row .ev-name{ flex:1; min-width:0; font-size:13px; font-weight:700; overflow-wrap:anywhere; }
   .ev-row .ev-count{ font-family:'JetBrains Mono',monospace; font-size:11.5px; color:var(--ink-dim); }
   .ev-row .ev-edit{
     flex:none; background:none; border:none; color:var(--ink-dim); cursor:pointer;
@@ -2766,6 +2768,7 @@ function syncRemoveEventLocal(id){
   events = events.filter(e=>e.id !== id);
   eventSnap.delete(id);
   if(pointsViewEvent === id) pointsViewEvent = null;
+  if(syncViewEvent === id) syncViewEvent = null;
   if(currentPointEventId === id) currentPointEventId = defaultEventId('point');
   if(editingEvent && editingEvent.id === id) editingEvent = null;
 }
@@ -2784,6 +2787,7 @@ function syncRekeyEvent(oldId, newEvId){
     }
   });
   if(pointsViewEvent === oldId) pointsViewEvent = newEvId;
+  if(syncViewEvent === oldId) syncViewEvent = newEvId;
   if(currentPointEventId === oldId) currentPointEventId = newEvId;
   if(editingEvent && editingEvent.id === oldId) editingEvent.id = newEvId;
 }
@@ -2809,6 +2813,7 @@ function loadPoints(){
 let currentPointEventId = defaultEventId('point');
 let pointsViewEvent = null;   // null=イベント一覧、値あり=そのイベントの記録一覧
 let editingEvent = null;      // 編集中のイベント(新規は {isNew:true})
+let syncViewEvent = null;     // 同期・共有の画面を開いているイベント
 
 const BACK_ARROW = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 5 8 12 15 19"/></svg>';
 
@@ -2821,6 +2826,7 @@ function renderPointsView(){
   const host = document.getElementById('pointsView');
   if(!host) return;
   if(editingEvent){ renderEventEditor(host, 'point'); return; }
+  if(syncViewEvent){ renderEventSyncView(host); return; }
   if(pointsViewEvent){ renderPointsOfEvent(host); return; }
   renderPointEventList(host);
 }
@@ -2843,15 +2849,23 @@ function renderPointEventList(host){
         <span class="ev-swatch">${shapeSwatch(ev.shape, ev.color)}</span>
         <span class="ev-name">${escapeHtml(ev.name)}${ev.synced ? `<svg class="ev-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="同期中"><path d="M7 18.5h10.2a4 4 0 0 0 .6-7.96A5.5 5.5 0 0 0 7.2 9.1 4.7 4.7 0 0 0 7 18.5z"/></svg>${(ev.memberIds||[]).length > 1 ? `<span class="ev-members-n">${ev.memberIds.length}人</span>` : ''}` : ''}</span>
         <span class="ev-count">${pointsOfEvent(ev.id).length}</span>
+        <button class="ev-edit" data-sync="${ev.id}">同期</button>
         <button class="ev-edit" data-export="${ev.id}">出力</button>
         <button class="ev-edit" data-edit="${ev.id}">編集</button>
       </div>`).join('')}`;
 
   host.querySelectorAll('[data-ev]').forEach(el=>{
     el.addEventListener('click', e=>{
-      if(e.target.dataset.edit || e.target.dataset.export) return;
+      if(e.target.dataset.edit || e.target.dataset.export || e.target.dataset.sync) return;
       pointsViewEvent = el.dataset.ev;
       currentPointEventId = el.dataset.ev;
+      renderPointsView();
+    });
+  });
+  host.querySelectorAll('[data-sync]').forEach(btn=>{
+    btn.addEventListener('click', e=>{
+      e.stopPropagation();
+      syncViewEvent = btn.dataset.sync;
       renderPointsView();
     });
   });
@@ -2887,6 +2901,7 @@ function renderPointsOfEvent(host){
     <div class="ev-head">
       <span class="ev-swatch">${shapeSwatch(ev.shape, ev.color)}</span>
       <span class="ev-name">${escapeHtml(ev.name)}${ev.synced ? '<svg class="ev-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="同期中"><path d="M7 18.5h10.2a4 4 0 0 0 .6-7.96A5.5 5.5 0 0 0 7.2 9.1 4.7 4.7 0 0 0 7 18.5z"/></svg>' : ''}</span>
+      <button class="ev-edit" id="evSyncHere">同期</button>
       <button class="ev-edit" id="evExportHere">出力</button>
       <button class="ev-edit" id="evEditHere">編集</button>
     </div>
@@ -2919,6 +2934,9 @@ function renderPointsOfEvent(host){
     editingEvent = Object.assign({}, ev); renderPointsView();
   });
   document.getElementById('evExportHere').addEventListener('click', ()=>openExportPicker(ev.id));
+  document.getElementById('evSyncHere').addEventListener('click', ()=>{
+    syncViewEvent = ev.id; renderPointsView();
+  });
   host.querySelectorAll('[data-point]').forEach(el=>{
     el.addEventListener('click', ()=>{
       const p = points.find(pt=>pt.id === el.dataset.point);
@@ -2927,6 +2945,30 @@ function renderPointsOfEvent(host){
       p.marker.openPopup();
     });
   });
+}
+
+/* イベントの同期・共有の画面(「同期」ボタンから開く) */
+function renderEventSyncView(host){
+  const ev = findEvent(syncViewEvent);
+  if(!ev){ syncViewEvent = null; renderPointsView(); return; }
+  host.innerHTML = `
+    <button class="ev-back" id="evSyncBack">${BACK_ARROW}${pointsViewEvent ? '記録一覧' : 'イベント一覧'}</button>
+    <div class="ev-head">
+      <span class="ev-swatch">${shapeSwatch(ev.shape, ev.color)}</span>
+      <span class="ev-name">${escapeHtml(ev.name)}</span>
+    </div>
+    <div id="syncBar"></div>
+    <div id="evSyncSection"></div>`;
+  document.getElementById('evSyncBack').addEventListener('click', ()=>{
+    syncViewEvent = null; renderPointsView();
+  });
+  if(window.DipSync){
+    window.DipSync.renderSyncBar(document.getElementById('syncBar'));
+    window.DipSync.renderEventSection(document.getElementById('evSyncSection'), ev);
+  } else {
+    document.getElementById('evSyncSection').innerHTML =
+      '<div class="ev-sync-note">同期機能を読み込んでいます…</div>';
+  }
 }
 
 /* イベントの作成・編集フォーム(ポイント/GPS共通) */
@@ -2960,7 +3002,6 @@ function renderEventEditor(host, kind){
       </div>
       ${!ev.isNew && editable ? `<div class="btn-row" style="margin-top:8px;"><button class="btn btn-ghost" id="evDelete" style="color:var(--red); border-color:var(--red);">このイベントを削除</button></div>
         ${stored && stored.synced ? '<div class="ev-sync-note" style="margin-top:6px;">同期中のイベントを削除すると、メンバー全員の同期が止まります(メンバーの端末には記録が残ります)。</div>' : ''}` : ''}
-      ${withMarkStyle && !ev.isNew ? '<div id="evSyncSection"></div>' : ''}
     </div>`;
   if(!editable){
     // 作成者以外は見るだけ(名前・色・形は作成者が決める)
@@ -2969,9 +3010,6 @@ function renderEventEditor(host, kind){
     if(sv) sv.style.display = 'none';
     const cc = host.querySelector('#evCancel');
     if(cc) cc.textContent = '閉じる';
-  }
-  if(withMarkStyle && !ev.isNew && window.DipSync){
-    window.DipSync.renderEventSection(document.getElementById('evSyncSection'), stored);
   }
 
   host.querySelectorAll('[data-color]').forEach(b=>{
