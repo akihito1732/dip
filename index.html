@@ -556,6 +556,38 @@
   .modal-note{ font-size:11px; color:var(--ink-dim); line-height:1.5; margin:0 0 12px; }
   .modal .btn-row{ margin-top:0; }
 
+  /* ---- 同期・共有 ---- */
+  .sync-bar{
+    display:flex; align-items:center; gap:10px; margin:0 0 10px;
+    background:var(--panel-2); border:1px solid var(--line); border-radius:9px; padding:9px 10px;
+  }
+  .sync-text{ flex:1; font-size:11.5px; line-height:1.5; color:var(--ink); min-width:0; }
+  .sync-text.dim{ color:var(--ink-dim); }
+  .sync-user{ font-weight:700; font-size:12px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .sync-status{ font-size:11px; color:var(--ink-dim); }
+  .sync-status::before{ content:''; display:inline-block; width:7px; height:7px; border-radius:50%; margin-right:5px; vertical-align:1px; background:var(--ink-dim); }
+  .sync-status.ok::before{ background:var(--teal); }
+  .sync-status.busy::before{ background:var(--orange); }
+  .sync-status.off::before{ background:var(--ink-dim); }
+  .sync-status.err{ color:var(--red); }
+  .sync-status.err::before{ background:var(--red); }
+  .sync-btn{ flex:none; padding:7px 12px; font-size:12px; }
+  .ev-cloud{ width:15px; height:15px; margin-left:6px; vertical-align:-2px; color:var(--teal); flex:none; }
+  .ev-members-n{ font-size:10.5px; color:var(--ink-dim); margin-left:4px; font-weight:400; }
+  .ev-sync{ margin-top:14px; padding-top:12px; border-top:1px solid var(--line); }
+  .ev-sync-title{ font-size:12.5px; font-weight:800; margin-bottom:6px; display:flex; align-items:center; gap:8px; }
+  .ev-sync-on{ font-size:10.5px; font-weight:700; color:var(--teal); border:1px solid var(--teal); border-radius:20px; padding:1px 7px; }
+  .ev-sync-note{ font-size:11px; color:var(--ink-dim); line-height:1.55; margin:0 0 8px; }
+  .ev-sync-btn{ width:100%; margin:2px 0 6px; }
+  .ev-members{ margin:4px 0 10px; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
+  .ev-member{ display:flex; align-items:center; gap:8px; padding:8px 10px; font-size:12.5px; background:var(--panel-2); }
+  .ev-member + .ev-member{ border-top:1px solid var(--line); }
+  .em-name{ flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .em-role{ font-size:10.5px; color:var(--ink-dim); }
+  .em-remove{ background:none; border:1px solid var(--line); color:var(--red); border-radius:6px; padding:3px 9px; font-size:11px; cursor:pointer; font-family:inherit; }
+  .point-popup .pp-author{ font-size:11px; color:var(--ink-dim); margin-bottom:6px; line-height:1.45; }
+  .pi-author{ font-size:10.5px; color:var(--ink-dim); margin-top:3px; }
+
   /* ---- 標高断面図 ---- */
   .prof-status{ font-size:12px; color:var(--ink-dim); padding:12px 2px; }
   .prof-wrap{ margin-top:10px; border:1px solid var(--line); border-radius:8px; overflow:hidden; }
@@ -1103,6 +1135,7 @@
 <script src="geology.js"></script>
 <script src="weather.js"></script>
 <script src="info.js"></script>
+<script type="module" src="sync.js"></script>
 <script>
 /* ---------------- Utility ---------------- */
 function haversine(a, b){
@@ -2291,13 +2324,17 @@ function stampChanged(records, snap){
     r.rec.updatedAt = r.src.updatedAt;
   });
 }
-// 削除記録を追加(同じIDの古い削除記録は置き換え)
-function addTombstones(list, ids){
-  const set = new Set(ids);
+// 削除記録を追加(同じIDの古い削除記録は置き換え)。items は {id, ...付加情報}
+function addTombstones(list, items){
+  const ids = new Set(items.map(x=>x.id));
   const now = Date.now();
-  const kept = list.filter(d=>!set.has(d.id));
-  set.forEach(id=>kept.push({ id, deleted:true, updatedAt:now }));
+  const kept = list.filter(d=>!ids.has(d.id));
+  items.forEach(x=>kept.push(Object.assign({}, x, { deleted:true, updatedAt:now })));
   return kept;
+}
+// 同期モジュール(sync.js)に「保存したので送ってよい」と知らせる
+function notifySync(){
+  if(window.DipSync) window.DipSync.schedulePush();
 }
 
 let events = [];        // {id, name, color, shape, kind:'point'|'track', updatedAt}
@@ -2310,7 +2347,7 @@ function eventRecord(e){ return { id:e.id, name:e.name, color:e.color, shape:e.s
   if(!Array.isArray(data)) data = [];
   data.forEach(d=>{
     if(!d || !d.id) return;
-    if(d.deleted){ deletedEvents.push({ id:d.id, deleted:true, updatedAt:d.updatedAt||0 }); return; }
+    if(d.deleted){ deletedEvents.push(Object.assign({}, d, { updatedAt:d.updatedAt||0 })); return; }
     // 旧データには updatedAt がないので 0(=どの端末の編集よりも古い)とみなす
     const ev = Object.assign({}, d, { updatedAt: d.updatedAt || 0 });
     events.push(ev);
@@ -2326,17 +2363,27 @@ if(events.length === 0){
   events.forEach(ev=>eventSnap.set(ev.id, recordSig(eventRecord(ev))));
   deletedEvents = deletedEvents.filter(d=>!events.some(e=>e.id === d.id));
 }
+// 同期の状態(作成者・メンバー)。中身の比較(updatedAt の判定)には含めない
+function eventSyncMeta(e){
+  return e.synced ? { synced:true, ownerId:e.ownerId, memberIds:e.memberIds || [], memberNames:e.memberNames || {} } : {};
+}
 function saveEvents(){
   const recs = events.map(e=>({ src:e, rec:eventRecord(e) }));
   stampChanged(recs, eventSnap);
-  const data = recs.map(r=>r.rec).concat(deletedEvents);
+  const data = recs.map(r=>Object.assign(r.rec, eventSyncMeta(r.src))).concat(deletedEvents);
   try{ localStorage.setItem('dg_events', JSON.stringify(data)); }catch(e){}
+  notifySync();
 }
 function deleteEvent(id){
+  const ev = findEvent(id);
   events = events.filter(e=>e.id !== id);
   eventSnap.delete(id);
-  deletedEvents = addTombstones(deletedEvents, [id]);
+  deletedEvents = addTombstones(deletedEvents, [ Object.assign({ id }, ev && ev.synced ? { synced:true, ownerId:ev.ownerId } : {}) ]);
   saveEvents();
+}
+// イベントの名前・色の変更や削除ができるか(同期中は作成者だけ)
+function eventEditable(ev){
+  return !window.DipSync || window.DipSync.isOwner(ev);
 }
 function eventsOf(kind){ return events.filter(e=>e.kind === kind); }
 function findEvent(id){ return events.find(e=>e.id === id); }
@@ -2448,6 +2495,16 @@ function buildPointPopup(point){
   labelInput.value = point.label || '';
   memoInput.value = point.memo || '';
 
+  // 同期中のイベントでは記録者を表示し、他のメンバーのポイントは見るだけにする
+  const pointEvent = findEvent(point.eventId);
+  const canEdit = pointEditable(point);
+  if(pointEvent && pointEvent.synced && point.authorName){
+    const a = document.createElement('div');
+    a.className = 'pp-author';
+    a.textContent = '記録: ' + point.authorName + (canEdit ? '' : '(編集・削除は記録した人だけができます)');
+    wrap.insertBefore(a, wrap.firstChild);
+  }
+
   // どのイベントに保存するかを選ぶ
   eventSelect.innerHTML = eventsOf('point')
     .map(ev=>`<option value="${ev.id}">${escapeHtml(ev.name)}</option>`).join('');
@@ -2510,6 +2567,13 @@ function buildPointPopup(point){
     deletePoints([point.id]);
     renderPointsList();
   });
+  if(!canEdit){
+    [labelInput, memoInput, eventSelect, wrap.querySelector('.pp-measure-btn')].forEach(el=>{ if(el) el.disabled = true; });
+    const row = wrap.querySelector('.pp-btnrow');
+    if(row) row.style.display = 'none';
+    const note = wrap.querySelector('.pp-orient-note');
+    if(note) note.style.display = 'none';
+  }
   return wrap;
 }
 
@@ -2645,22 +2709,81 @@ function pointStoreRecord(p){
            elevation:p.elevation!=null?p.elevation:null,
            elevationSource:p.elevationSource||null,
            gpsAltitude:p.gpsAltitude!=null?p.gpsAltitude:null,
-           geology:p.geology||null };
+           geology:p.geology||null,
+           authorId:p.authorId||null, authorName:p.authorName||null };
+}
+// ポイントを編集・削除できるか(同期中のイベントでは記録した本人だけ)
+function pointEditable(p){
+  return !window.DipSync || window.DipSync.canEditPoint(p);
 }
 function savePoints(){
   const recs = points.map(p=>({ src:p, rec:pointStoreRecord(p) }));
   stampChanged(recs, pointSnap);
   const data = recs.map(r=>r.rec).concat(deletedPoints);
   try{ localStorage.setItem('dg_points', JSON.stringify(data)); }catch(e){}
+  notifySync();
 }
 // ポイントを削除する(地図から消し、他の端末に伝えるための削除記録を残す)
-function deletePoints(ids){
-  const set = new Set(ids);
-  points.forEach(p=>{ if(set.has(p.id) && p.marker) map.removeLayer(p.marker); });
+// 同期中のイベントでは、他のメンバーが記録したポイントは消さない(force はイベントごと削除するとき)
+function deletePoints(ids, force){
+  let targets = points.filter(p=>ids.includes(p.id));
+  if(!force){
+    const blocked = targets.filter(p=>!pointEditable(p));
+    if(blocked.length){
+      alert(`他のメンバーが記録したポイント(${blocked.length}件)は削除できません。` +
+            (blocked.length < targets.length ? 'それ以外を削除します。' : ''));
+      targets = targets.filter(p=>pointEditable(p));
+    }
+  }
+  if(!targets.length) return 0;
+  const set = new Set(targets.map(p=>p.id));
+  targets.forEach(p=>{ if(p.marker) map.removeLayer(p.marker); });
   points = points.filter(p=>!set.has(p.id));
   set.forEach(id=>pointSnap.delete(id));
-  deletedPoints = addTombstones(deletedPoints, [...set]);
+  deletedPoints = addTombstones(deletedPoints, targets.map(p=>({ id:p.id, eventId:p.eventId||null, authorId:p.authorId||null })));
   savePoints();
+  return targets.length;
+}
+
+/* ---------------- 同期モジュール(sync.js)から使う操作 ---------------- */
+// 受信したデータを反映したあと、それを「変更」と数えないように比較用の記録を合わせる
+function syncMarkClean(kind, obj){
+  if(kind === 'event') eventSnap.set(obj.id, recordSig(eventRecord(obj)));
+  else pointSnap.set(obj.id, recordSig(pointStoreRecord(obj)));
+}
+// 他の端末で削除されたポイントを、この端末からも消す(削除記録は作らない)
+function syncRemovePointLocal(id){
+  const p = points.find(x=>x.id === id);
+  if(p && p.marker) map.removeLayer(p.marker);
+  points = points.filter(x=>x.id !== id);
+  pointSnap.delete(id);
+}
+// 他の端末で削除されたイベントを、中のポイントごと消す
+function syncRemoveEventLocal(id){
+  points.filter(p=>p.eventId === id).map(p=>p.id).forEach(syncRemovePointLocal);
+  events = events.filter(e=>e.id !== id);
+  eventSnap.delete(id);
+  if(pointsViewEvent === id) pointsViewEvent = null;
+  if(currentPointEventId === id) currentPointEventId = defaultEventId('point');
+  if(editingEvent && editingEvent.id === id) editingEvent = null;
+}
+// イベントのIDを付け替える(同期を始めるとき、他の人のイベントとIDが重ならないように)
+function syncRekeyEvent(oldId, newEvId){
+  const ev = findEvent(oldId);
+  if(!ev) return;
+  const defId = defaultEventId('point');   // 付け替える前に求めておく
+  ev.id = newEvId;
+  eventSnap.delete(oldId);
+  eventSnap.set(newEvId, recordSig(eventRecord(ev)));
+  points.forEach(p=>{
+    if((p.eventId || defId) === oldId){
+      p.eventId = newEvId;
+      pointSnap.set(p.id, recordSig(pointStoreRecord(p)));   // IDの付け替えは「編集」として数えない
+    }
+  });
+  if(pointsViewEvent === oldId) pointsViewEvent = newEvId;
+  if(currentPointEventId === oldId) currentPointEventId = newEvId;
+  if(editingEvent && editingEvent.id === oldId) editingEvent.id = newEvId;
 }
 function loadPoints(){
   let data = [];
@@ -2711,11 +2834,12 @@ function renderPointEventList(host){
       <button class="btn btn-ghost" id="pointsExport">全て書き出し</button>
       <button class="btn btn-ghost" id="pointsImport">読み込み</button>
     </div>
+    <div id="syncBar"></div>
     <div class="hint">イベントごとにマークの色と形を分けて記録できます。イベントを選ぶと記録一覧が開きます。</div>
     ${list.map(ev=>`
       <div class="ev-row" data-ev="${ev.id}">
         <span class="ev-swatch">${shapeSwatch(ev.shape, ev.color)}</span>
-        <span class="ev-name">${escapeHtml(ev.name)}</span>
+        <span class="ev-name">${escapeHtml(ev.name)}${ev.synced ? `<svg class="ev-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="同期中"><path d="M7 18.5h10.2a4 4 0 0 0 .6-7.96A5.5 5.5 0 0 0 7.2 9.1 4.7 4.7 0 0 0 7 18.5z"/></svg>${(ev.memberIds||[]).length > 1 ? `<span class="ev-members-n">${ev.memberIds.length}人</span>` : ''}` : ''}</span>
         <span class="ev-count">${pointsOfEvent(ev.id).length}</span>
         <button class="ev-edit" data-export="${ev.id}">出力</button>
         <button class="ev-edit" data-edit="${ev.id}">編集</button>
@@ -2749,6 +2873,7 @@ function renderPointEventList(host){
   bindPointsExport();
   bindPointsImport();
   bindPointHere();
+  if(window.DipSync) window.DipSync.renderSyncBar(document.getElementById('syncBar'));
 }
 
 function renderPointsOfEvent(host){
@@ -2759,7 +2884,7 @@ function renderPointsOfEvent(host){
     <button class="ev-back" id="evBack">${BACK_ARROW}イベント一覧</button>
     <div class="ev-head">
       <span class="ev-swatch">${shapeSwatch(ev.shape, ev.color)}</span>
-      <span class="ev-name">${escapeHtml(ev.name)}</span>
+      <span class="ev-name">${escapeHtml(ev.name)}${ev.synced ? '<svg class="ev-cloud" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-label="同期中"><path d="M7 18.5h10.2a4 4 0 0 0 .6-7.96A5.5 5.5 0 0 0 7.2 9.1 4.7 4.7 0 0 0 7 18.5z"/></svg>' : ''}</span>
       <button class="ev-edit" id="evExportHere">出力</button>
       <button class="ev-edit" id="evEditHere">編集</button>
     </div>
@@ -2781,6 +2906,7 @@ function renderPointsOfEvent(host){
           </div>
           ${p.geology && !p.geology.none ? `<div class="pi-geo"><span class="geo-swatch xs" style="background:${p.geology.color}"></span>${escapeHtml(Geology.describe(p.geology))}</div>` : ''}
           ${p.memo ? `<div class="pi-memo">${escapeHtml(p.memo)}</div>` : ''}
+          ${ev.synced && p.authorName ? `<div class="pi-author">記録: ${escapeHtml(p.authorName)}</div>` : ''}
         </div>`).join('')}`;
 
   bindPointHere();
@@ -2806,6 +2932,8 @@ function renderEventEditor(host, kind){
   const ev = editingEvent;
   // GPS記録のイベントは地図上にマークを置かないので、名前だけを設定する
   const withMarkStyle = (kind === 'point');
+  const stored = !ev.isNew ? findEvent(ev.id) : null;
+  const editable = ev.isNew || eventEditable(stored);
   host.innerHTML = `
     <div class="ev-editor">
       <input type="text" id="evName" placeholder="イベント名(例:○○地区 巡検)" value="${escapeHtml(ev.name||'')}">
@@ -2828,8 +2956,21 @@ function renderEventEditor(host, kind){
         <button class="btn btn-primary" id="evSave">${ev.isNew?'作成':'保存'}</button>
         <button class="btn btn-ghost" id="evCancel">キャンセル</button>
       </div>
-      ${!ev.isNew ? '<div class="btn-row" style="margin-top:8px;"><button class="btn btn-ghost" id="evDelete" style="color:var(--red); border-color:var(--red);">このイベントを削除</button></div>' : ''}
+      ${!ev.isNew && editable ? `<div class="btn-row" style="margin-top:8px;"><button class="btn btn-ghost" id="evDelete" style="color:var(--red); border-color:var(--red);">このイベントを削除</button></div>
+        ${stored && stored.synced ? '<div class="ev-sync-note" style="margin-top:6px;">同期中のイベントを削除すると、メンバー全員の同期が止まります(メンバーの端末には記録が残ります)。</div>' : ''}` : ''}
+      ${withMarkStyle && !ev.isNew ? '<div id="evSyncSection"></div>' : ''}
     </div>`;
+  if(!editable){
+    // 作成者以外は見るだけ(名前・色・形は作成者が決める)
+    host.querySelectorAll('#evName, [data-color], [data-shape]').forEach(el=>{ el.disabled = true; });
+    const sv = host.querySelector('#evSave');
+    if(sv) sv.style.display = 'none';
+    const cc = host.querySelector('#evCancel');
+    if(cc) cc.textContent = '閉じる';
+  }
+  if(withMarkStyle && !ev.isNew && window.DipSync){
+    window.DipSync.renderEventSection(document.getElementById('evSyncSection'), stored);
+  }
 
   host.querySelectorAll('[data-color]').forEach(b=>{
     b.addEventListener('click', ()=>{ editingEvent.color = b.dataset.color; renderEventEditor(host, kind); });
@@ -2866,7 +3007,7 @@ function renderEventEditor(host, kind){
       if(eventsOf(kind).length <= 1){ alert('イベントは1つ以上必要です。'); return; }
       if(!confirm(`「${ev.name}」を削除しますか?中の記録も削除されます。`)) return;
       if(kind === 'point'){
-        deletePoints(points.filter(p=>(p.eventId||defaultEventId('point')) === ev.id).map(p=>p.id));
+        deletePoints(points.filter(p=>(p.eventId||defaultEventId('point')) === ev.id).map(p=>p.id), true);
         pointsViewEvent = null;
         currentPointEventId = null;
       } else {

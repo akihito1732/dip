@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dip-v28';
+const CACHE_NAME = 'dip-v29';
 
 // アプリ本体(地図タイルは含めない。タイルは通信時のみ取得)
 const APP_SHELL = [
@@ -12,6 +12,7 @@ const APP_SHELL = [
   './geology-legend.json',
   './weather.js',
   './info.js',
+  './sync.js',
   './icons/icon-192.png',
   './icons/icon-512.png',
   'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.css',
@@ -42,8 +43,17 @@ self.addEventListener('fetch', event => {
   // 地図タイル・外部APIは常にネットワークから取得する(容量と鮮度のため)。
   // 気象庁は時刻一覧が数分ごとに更新されるので、キャッシュすると古い時刻を返し続けてしまう。
   // Googleマップは規約上、地図データをキャッシュ(保存)してはいけないので必ず除外する。
-  const isLive = /tile|cyberjapandata|disaportaldata|gbank\.gsj\.jp|jma\.go\.jp|nominatim|router\.project-osrm|maps\.googleapis\.com|maps\.gstatic\.com|googleusercontent\.com|ggpht\.com|google\.com\/maps/.test(url.href);
+  // 同期(Firebase)の通信やログインは、古い応答を返すと壊れるので絶対にキャッシュしない。
+  // (Firebase のプログラム本体 www.gstatic.com/firebasejs/ はオフラインで起動できるようキャッシュする)
+  const isLive = /tile|cyberjapandata|disaportaldata|gbank\.gsj\.jp|jma\.go\.jp|nominatim|router\.project-osrm|(maps|firestore|identitytoolkit|securetoken|firebaseinstallations|www)\.googleapis\.com|maps\.gstatic\.com|googleusercontent\.com|ggpht\.com|google\.com\/maps|firebaseapp\.com|apis\.google\.com|accounts\.google\.com/.test(url.href);
   if (isLive) return;
+  // 招待リンク(?join=…)などクエリ付きのページは、キャッシュ済みのアプリ本体で開く
+  if (event.request.mode === 'navigate' && url.origin === self.location.origin && url.search) {
+    event.respondWith(caches.match('./index.html').then(c => c || fetch(event.request)));
+    return;
+  }
+  // POST など GET 以外はキャッシュの対象外
+  if (event.request.method !== 'GET') return;
 
   // アプリ本体はキャッシュ優先、なければネットワーク
   event.respondWith(
