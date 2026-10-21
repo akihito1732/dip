@@ -1045,7 +1045,7 @@
     <div class="sheet-body">
       <!-- 距離測定 -->
       <div class="panel active" id="panel-measure">
-        <div class="hint">地図をタップして点をつないでいくと、区間ごとの距離と総距離を測れます。</div>
+        <div class="hint">　地図をタップして点をつないでいくと、区間ごとの距離と総距離を測れます。</div>
         <div class="readout">
           <div class="stat"><div class="k">総距離</div><div class="v" id="measureDist">— m</div></div>
           <div class="stat"><div class="k">徒歩の目安（分速80m）</div><div class="v" id="measureTime">—</div></div>
@@ -1064,7 +1064,7 @@
 
       <!-- 同心円 -->
       <div class="panel" id="panel-rings">
-        <div class="hint">現在地を中心に、指定した間隔で同心円を表示します。危険範囲や避難距離の目安に。</div>
+        <div class="hint">　現在地を中心に、指定した間隔で同心円を表示します。<br>危険範囲や避難距離の目安に。</div>
         <div class="row">
           <label>間隔 (m)</label>
           <input type="number" id="ringInterval" value="500" min="10" step="10">
@@ -1081,7 +1081,7 @@
 
       <!-- 検索 -->
       <div class="panel" id="panel-search">
-        <div class="hint">地名・施設名で検索できます。結果を選ぶと地図が移動し、現在地からの徒歩経路も表示できます。</div>
+        <div class="hint">　地名・施設名で検索できます。結果を選ぶと地図が移動し、<br>現在地からの徒歩経路も表示できます。</div>
         <div class="search-row">
           <input type="text" id="searchInput" placeholder="例:金沢大学、○○小学校、避難所">
           <button class="btn btn-primary" id="searchBtn">検索</button>
@@ -1098,7 +1098,7 @@
       <!-- GPS記録 -->
       <div class="panel" id="panel-track">
         <div id="trackEventEditor" style="display:none;"></div>
-        <div class="hint track-normal">移動しながら記録すると、歩いた距離・経路・経過時間を計測できます。避難ルートの確認に。</div>
+        <div class="hint track-normal">　移動しながら記録すると、歩いた距離・経路・経過時間を<br>計測できます。避難ルートの確認に。</div>
         <div class="ev-select-row track-normal">
           <label>イベント</label>
           <select id="trackEventSelect"></select>
@@ -2843,7 +2843,7 @@ function renderPointEventList(host){
       <button class="btn btn-ghost" id="pointsImport">読み込み</button>
     </div>
     <div id="syncBar"></div>
-    <div class="hint">イベントごとにマークの色と形を分けて記録できます。イベントを選ぶと記録一覧が開きます。</div>
+    <div class="hint">　イベントごとにマークの色と形を分けて記録できます。<br>イベントを選ぶと記録一覧が開きます。</div>
     ${list.map(ev=>`
       <div class="ev-row" data-ev="${ev.id}">
         <span class="ev-swatch">${shapeSwatch(ev.shape, ev.color)}</span>
@@ -2908,7 +2908,7 @@ function renderPointsOfEvent(host){
     <div class="btn-row" style="margin-bottom:10px;">
       <button class="btn btn-primary" id="pointHere">現在地を取得</button>
     </div>
-    <div class="hint">地図をタップすると、このイベントにポイントが追加されます。</div>
+    <div class="hint">　地図をタップすると、このイベントにポイントが追加されます。</div>
     ${list.length === 0
       ? '<div class="points-empty">まだポイントがありません。地図をタップして追加してください。</div>'
       : list.map(p=>`
@@ -3979,7 +3979,7 @@ LEGEND_RENDERERS.weather = function(body){
       <div class="lg-title">キキクル(大雨・土砂・浸水・洪水)</div>
       ${lgRows(KIKIKURU_LEGEND.map(([l,sub,c])=>({label:l, sub, color:c})))}
       <div class="lg-note">
-        土砂は2時間先、浸水は1時間先、洪水は3時間先までの予測を含めて色分けされています。
+        　土砂は2時間先、浸水は1時間先、洪水は3時間先までの予測を含めて色分けされています。
         大雨キキクルは2026年5月29日の防災気象情報の見直しで加わりました。
         黒を待たず、紫(危険)の段階で安全な場所への避難を判断してください。
         色見本は気象庁の配色指針によるもので、地図上の色とわずかに異なる場合があります。
@@ -3989,7 +3989,7 @@ LEGEND_RENDERERS.weather = function(body){
       <div class="lg-title">衛星ひまわり(赤外画像)</div>
       <div class="lg-grad" style="background:linear-gradient(90deg,#1a1a1a,#f4f4f4)"></div>
       <div class="lg-grad-lab"><span>雲頂温度が高い(低い雲・晴天域)</span><span>低い(背の高い雲)</span></div>
-      <div class="lg-note">赤外画像は雲の温度を明暗で表します。白く明るいほど雲頂が高く、発達した積乱雲などを示します。夜間でも観測できます。</div>
+      <div class="lg-note">　赤外画像は雲の温度を明暗で表します。白く明るいほど雲頂が高く、発達した積乱雲などを示します。夜間でも観測できます。</div>
     </div>
     <div class="lg-note">
       出典:気象庁ホームページ(雨雲の動き・キキクル・気象衛星)。拡大表示のため加工して表示しています。
