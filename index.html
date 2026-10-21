@@ -540,6 +540,21 @@
   .modal-opt b{ font-size:13px; }
   .modal-opt span{ font-size:11px; color:var(--ink-dim); }
   .modal .modal-cancel{ width:100%; margin-top:4px; }
+  /* 「端末に保存 / 共有メニュー」の切り替え */
+  .modal-seg{ display:flex; gap:0; margin-bottom:12px; border:1px solid var(--line); border-radius:9px; overflow:hidden; }
+  .modal-seg button{
+    flex:1; padding:8px 6px; border:none; background:var(--panel-2); color:var(--ink-dim);
+    font-family:inherit; font-size:12px; font-weight:700; cursor:pointer;
+  }
+  .modal-seg button + button{ border-left:1px solid var(--line); }
+  .modal-seg button.on{ background:var(--orange); color:#1a1200; }
+  .modal-label{ font-size:11.5px; color:var(--ink-dim); margin:0 0 5px; }
+  .modal-select{
+    width:100%; background:var(--panel-2); border:1px solid var(--line); color:var(--ink);
+    border-radius:8px; padding:9px 8px; font-size:13px; margin-bottom:8px; font-family:inherit;
+  }
+  .modal-note{ font-size:11px; color:var(--ink-dim); line-height:1.5; margin:0 0 12px; }
+  .modal .btn-row{ margin-top:0; }
 
   /* ---- 標高断面図 ---- */
   .prof-status{ font-size:12px; color:var(--ink-dim); padding:12px 2px; }
@@ -2692,8 +2707,9 @@ function renderPointEventList(host){
       <button class="btn btn-primary" id="pointHere">現在地を取得</button>
     </div>
     <div class="btn-row" style="margin-bottom:12px;">
-      <button class="btn btn-ghost" id="evNew">イベントを作成</button>
+      <button class="btn btn-ghost" id="evNew">イベント作成</button>
       <button class="btn btn-ghost" id="pointsExport">全て書き出し</button>
+      <button class="btn btn-ghost" id="pointsImport">読み込み</button>
     </div>
     <div class="hint">イベントごとにマークの色と形を分けて記録できます。イベントを選ぶと記録一覧が開きます。</div>
     ${list.map(ev=>`
@@ -2731,6 +2747,7 @@ function renderPointEventList(host){
     renderPointsView();
   });
   bindPointsExport();
+  bindPointsImport();
   bindPointHere();
 }
 
@@ -2959,12 +2976,16 @@ function exportPointsGeoJSON(evId){
       return {
         type:'Feature',
         geometry:{ type:'Point', coordinates: p.elevation != null ? [p.lng, p.lat, p.elevation] : [p.lng, p.lat] },
-        properties: Object.assign({}, r, { eventColor: ev.color || '', eventShape: ev.shape || '' })
+        properties: Object.assign({}, r, { eventColor: ev.color || '', eventShape: ev.shape || '' }),
+        // dipで読み込み直したときに元通りに戻すための情報(GISソフトでは無視される)
+        dip: { point: Object.assign(pointStoreRecord(p), { updatedAt: p.updatedAt || null }),
+               event: ev.id ? eventRecord(ev) : null }
       };
-    })
+    }),
+    dip: { app:'dip', format:1, exportedAt: new Date().toISOString() }
   };
-  downloadBlob(new Blob([JSON.stringify(geojson, null, 2)], {type:'application/geo+json'}),
-               exportBaseName(evId)+'.geojson');
+  outputBlob(new Blob([JSON.stringify(geojson, null, 2)], {type:'application/geo+json'}),
+             exportBaseName(evId)+'.geojson');
 }
 
 function exportPointsCSV(evId){
@@ -2986,7 +3007,7 @@ function exportPointsCSV(evId){
   });
   // Excelで文字化けしないよう BOM 付き UTF-8 にする
   const csv = '\uFEFF' + [head.join(','), ...rows].join('\r\n');
-  downloadBlob(new Blob([csv], {type:'text/csv;charset=utf-8'}), exportBaseName(evId)+'.csv');
+  outputBlob(new Blob([csv], {type:'text/csv;charset=utf-8'}), exportBaseName(evId)+'.csv');
 }
 
 // KML本文を組み立てる(KMZでも同じものを使う)
@@ -3043,8 +3064,8 @@ ${placemarks}
 
 function exportPointsKML(evId){
   if(!exportTargets(evId).length){ alert('まだポイントがありません。'); return; }
-  downloadBlob(new Blob([buildKML(evId)], {type:'application/vnd.google-earth.kml+xml'}),
-               exportBaseName(evId)+'.kml');
+  outputBlob(new Blob([buildKML(evId)], {type:'application/vnd.google-earth.kml+xml'}),
+             exportBaseName(evId)+'.kml');
 }
 
 async function exportPointsKMZ(evId){
@@ -3054,7 +3075,7 @@ async function exportPointsKMZ(evId){
     const zip = new JSZip();
     zip.file('doc.kml', buildKML(evId));
     const blob = await zip.generateAsync({ type:'blob', compression:'DEFLATE' });
-    downloadBlob(blob, exportBaseName(evId)+'.kmz');
+    await outputBlob(new Blob([blob], {type:'application/vnd.google-earth.kmz'}), exportBaseName(evId)+'.kmz');
   }catch(err){
     alert('KMZの作成に失敗しました。通信環境をご確認のうえ、KML形式をお試しください。');
   }
@@ -3075,11 +3096,44 @@ function ensureJSZip(){
   return jszipPromise;
 }
 
+/* ---------------- 書き出したファイルの渡し方(端末に保存 / 共有メニュー) ---------------- */
+let exportDelivery = 'download';   // 'download' | 'share'
+
+// この端末のブラウザがファイルを共有メニューで送れるか
+function canShareFiles(){
+  try{
+    return !!(navigator.share && navigator.canShare &&
+              navigator.canShare({ files:[ new File(['x'], 'x.txt', { type:'text/plain' }) ] }));
+  }catch(e){ return false; }
+}
+
+// 選ばれた渡し方でファイルを出す。共有できない形式・状況なら端末に保存する
+async function outputBlob(blob, filename){
+  if(exportDelivery === 'share'){
+    const file = new File([blob], filename, { type: blob.type || 'application/octet-stream' });
+    let ok = false;
+    try{ ok = navigator.canShare({ files:[file] }); }catch(e){}
+    if(ok){
+      try{
+        await navigator.share({ files:[file], title: filename });
+        return;
+      }catch(err){
+        if(err && err.name === 'AbortError') return;   // 共有メニューを自分で閉じた
+      }
+    }
+    alert('この端末ではこの形式のファイルを共有メニューで送れないため、端末に保存します。\n保存したファイルをLINEなどで送ってください。');
+  }
+  downloadBlob(blob, filename);
+}
+
 /* 書き出し形式を選ぶダイアログ */
 function openExportPicker(evId){
   const name = evId && findEvent(evId) ? findEvent(evId).name : 'すべてのポイント';
   const count = exportTargets(evId).length;
   if(!count){ alert('まだポイントがありません。'); return; }
+
+  const shareable = canShareFiles();
+  if(!shareable) exportDelivery = 'download';
 
   const back = document.createElement('div');
   back.className = 'modal-back';
@@ -3087,7 +3141,12 @@ function openExportPicker(evId){
     <div class="modal">
       <div class="modal-title">書き出し形式を選択</div>
       <div class="modal-sub">${escapeHtml(name)}（${count}点）</div>
-      <button class="modal-opt" data-fmt="geojson"><b>GeoJSON</b><span>QGISなどのGISソフト向け</span></button>
+      ${shareable ? `
+      <div class="modal-seg">
+        <button data-deliver="download" class="${exportDelivery === 'download' ? 'on' : ''}">端末に保存</button>
+        <button data-deliver="share" class="${exportDelivery === 'share' ? 'on' : ''}">共有メニューで送る</button>
+      </div>` : ''}
+      <button class="modal-opt" data-fmt="geojson"><b>GeoJSON</b><span>QGISなどのGISソフト向け。dipで読み込むと元通りに戻せます</span></button>
       <button class="modal-opt" data-fmt="csv"><b>CSV</b><span>Excel・表計算ソフト向け</span></button>
       <button class="modal-opt" data-fmt="kml"><b>KML</b><span>Google Earth・マイマップ向け</span></button>
       <button class="modal-opt" data-fmt="kmz"><b>KMZ</b><span>KMLを圧縮した形式</span></button>
@@ -3098,6 +3157,15 @@ function openExportPicker(evId){
   const close = ()=>back.remove();
   back.addEventListener('click', e=>{ if(e.target === back) close(); });
   back.querySelector('.modal-cancel').addEventListener('click', close);
+  back.querySelectorAll('[data-deliver]').forEach(b=>{
+    b.addEventListener('click', ()=>{
+      exportDelivery = b.dataset.deliver;
+      back.querySelectorAll('[data-deliver]').forEach(x=>x.classList.toggle('on', x === b));
+      // KMZは圧縮ライブラリの読み込みを待つ間に共有の許可が切れることがあるので、先に読み込んでおく
+      if(exportDelivery === 'share') ensureJSZip().catch(()=>{});
+    });
+  });
+  if(exportDelivery === 'share') ensureJSZip().catch(()=>{});
   back.querySelectorAll('[data-fmt]').forEach(b=>{
     b.addEventListener('click', ()=>{
       const f = b.dataset.fmt;
@@ -3108,6 +3176,430 @@ function openExportPicker(evId){
       else if(f === 'kmz') exportPointsKMZ(evId);
     });
   });
+}
+
+/* ---------------- ポイントの読み込み(GeoJSON / CSV / KML / KMZ) ----------------
+   dipで書き出したGeoJSONは、ID・イベント・走向傾斜・地質まで元通りに戻す。
+   それ以外(他のアプリのファイルやCSV/KML)は、位置・名称・メモを中心に取り込む。
+   同じIDのポイントがすでにある場合は、新しい方の内容で上書きする(古ければ何もしない)。 */
+
+function bindPointsImport(){
+  const btn = document.getElementById('pointsImport');
+  if(!btn) return;
+  btn.addEventListener('click', ()=>{
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.geojson,.json,.csv,.kml,.kmz,application/geo+json,application/json,text/csv,application/vnd.google-earth.kml+xml,application/vnd.google-earth.kmz';
+    input.addEventListener('change', ()=>{
+      const file = input.files && input.files[0];
+      if(file) startImport(file);
+    });
+    input.click();
+  });
+}
+
+async function startImport(file){
+  let parsed;
+  try{
+    parsed = await parseImportFile(file);
+  }catch(err){
+    alert('ファイルを読み込めませんでした。\n' + (err && err.message ? err.message : ''));
+    return;
+  }
+  if(!parsed.items.length){
+    alert('このファイルには読み込めるポイントがありませんでした。' +
+          (parsed.skipped ? `\n(位置が読み取れない記録が${parsed.skipped}件ありました)` : ''));
+    return;
+  }
+  openImportDialog(file, parsed);
+}
+
+/* --- ファイルの種類ごとの読み取り --- */
+async function parseImportFile(file){
+  const name = file.name.toLowerCase();
+  if(name.endsWith('.kmz')){
+    try{ await ensureJSZip(); }
+    catch(e){ throw new Error('KMZを開くには通信が必要です。通信できる場所で再度お試しください。'); }
+    const zip = await JSZip.loadAsync(file);
+    const kmlName = Object.keys(zip.files).find(n=>/\.kml$/i.test(n));
+    if(!kmlName) throw new Error('KMZの中にKMLが見つかりませんでした。');
+    return parseKML(await zip.file(kmlName).async('string'));
+  }
+  const text = await readTextSmart(file);
+  if(name.endsWith('.kml')) return parseKML(text);
+  if(name.endsWith('.csv')) return parseCSVPoints(text);
+  // .geojson / .json、または拡張子が不明なものは中身で判断する
+  const head = text.trimStart();
+  if(head.startsWith('{') || head.startsWith('[')) return parseGeoJSON(text);
+  if(head.startsWith('<')) return parseKML(text);
+  return parseCSVPoints(text);
+}
+
+// UTF-8で読めなければShift_JIS(Excelで保存したCSVなど)として読む
+async function readTextSmart(file){
+  const buf = await file.arrayBuffer();
+  try{
+    return new TextDecoder('utf-8', { fatal:true }).decode(buf).replace(/^﻿/, '');
+  }catch(e){
+    try{ return new TextDecoder('shift_jis').decode(buf); }
+    catch(e2){ return new TextDecoder('utf-8').decode(buf).replace(/^﻿/, ''); }
+  }
+}
+
+function toNum(v){
+  if(v == null || v === '') return null;
+  const n = typeof v === 'number' ? v : parseFloat(String(v).replace(/[^\d.+\-eE]/g, ''));
+  return Number.isFinite(n) ? n : null;
+}
+function validLatLng(lat, lng){
+  return lat != null && lng != null && lat >= -90 && lat <= 90 && lng >= -180 && lng <= 180;
+}
+function parseTime(v){
+  if(v == null || v === '') return null;
+  if(typeof v === 'number') return v;
+  const t = Date.parse(String(v).replace(/\//g, '-'));
+  return Number.isFinite(t) ? t : null;
+}
+
+// dipの書き出し項目(CSV列やGeoJSONのproperties)から、ポイントの中身を組み立てる
+function pointFieldsFromFlat(r){
+  const out = {
+    label: r.label != null ? String(r.label) : '',
+    memo: r.memo != null ? String(r.memo) : '',
+    createdAt: parseTime(r.created_at),
+  };
+  const elev = toNum(r.elevation_ref);
+  if(elev != null) out.elevation = elev;
+  const gpsAlt = toNum(r.elevation_measured);
+  if(gpsAlt != null) out.gpsAltitude = gpsAlt;
+  // 走向傾斜:傾斜角と傾斜方向があれば記号付きで復元する
+  const dip = toNum(r.dip_deg), dipDir = toNum(r.dip_direction_deg);
+  if(dip != null && dipDir != null){
+    const heading = toNum(r.heading_deg);
+    out.orientation = {
+      heading: heading != null ? heading : dipDir,
+      dip, dipDirection: dipDir,
+      strike: StrikeDip.strikeFromDipDirection(dipDir),
+      absolute: null, measuredAt: out.createdAt || null, imported: true
+    };
+  }
+  return out;
+}
+
+function makeImportResult(){
+  return { items:[], events:new Map(), skipped:0 };
+}
+// ファイル内のイベント(名前・色・形・ID)を登録し、そのキーを返す
+function noteImportEvent(res, info){
+  if(!info || (!info.name && !info.id)) return null;
+  const key = info.id ? 'id:' + info.id : 'name:' + info.name;
+  if(!res.events.has(key)) res.events.set(key, info);
+  return key;
+}
+
+function parseGeoJSON(text){
+  let data;
+  try{ data = JSON.parse(text); }
+  catch(e){ throw new Error('JSONの形式が正しくありません。'); }
+  const res = makeImportResult();
+  const features = data.type === 'FeatureCollection' ? (data.features || [])
+                 : data.type === 'Feature' ? [data]
+                 : Array.isArray(data) ? data : [];
+  features.forEach(f=>{
+    const g = f && f.geometry;
+    if(!g || g.type !== 'Point' || !Array.isArray(g.coordinates)){ res.skipped++; return; }
+    const lng = toNum(g.coordinates[0]), lat = toNum(g.coordinates[1]);
+    if(!validLatLng(lat, lng)){ res.skipped++; return; }
+    const props = f.properties || {};
+
+    // dipで書き出したファイル:保存形式そのままで復元する
+    if(f.dip && f.dip.point && f.dip.point.id){
+      const dp = f.dip.point;
+      const ev = f.dip.event;
+      res.items.push({
+        id: String(dp.id),
+        updatedAt: toNum(dp.updatedAt),
+        eventKey: ev ? noteImportEvent(res, { id:ev.id, name:ev.name, color:ev.color, shape:ev.shape }) : null,
+        fields: {
+          lat, lng,
+          label: dp.label || '', memo: dp.memo || '',
+          createdAt: toNum(dp.createdAt),
+          orientation: dp.orientation || null,
+          elevation: dp.elevation != null ? dp.elevation : null,
+          elevationSource: dp.elevationSource || null,
+          gpsAltitude: dp.gpsAltitude != null ? dp.gpsAltitude : null,
+          geology: dp.geology || null,
+        }
+      });
+      return;
+    }
+
+    // それ以外:dipの古い書き出しや他のアプリのGeoJSON
+    const flat = Object.assign({}, props, {
+      label: props.label != null ? props.label : (props.name || props.title || props['名称'] || ''),
+      memo: props.memo != null ? props.memo : (props.description || props.note || props['メモ'] || ''),
+    });
+    const fields = Object.assign(pointFieldsFromFlat(flat), { lat, lng });
+    const evName = props.event || props['イベント'] || '';
+    res.items.push({
+      id: null,
+      eventKey: evName ? noteImportEvent(res, { name:String(evName), color:props.eventColor || null, shape:props.eventShape || null }) : null,
+      fields
+    });
+  });
+  return res;
+}
+
+function parseKML(text){
+  const doc = new DOMParser().parseFromString(text, 'application/xml');
+  if(doc.getElementsByTagName('parsererror').length) throw new Error('KMLの形式が正しくありません。');
+  const res = makeImportResult();
+  const child = (el, tag)=>{
+    for(const c of el.children) if(c.localName === tag) return c;
+    return null;
+  };
+  const childText = (el, tag)=>{ const c = child(el, tag); return c ? c.textContent.trim() : ''; };
+
+  [...doc.getElementsByTagNameNS('*', 'Placemark')].forEach(pm=>{
+    const pt = pm.getElementsByTagNameNS('*', 'Point')[0];
+    const coordEl = pt ? pt.getElementsByTagNameNS('*', 'coordinates')[0] : null;
+    if(!coordEl){ res.skipped++; return; }
+    const c = coordEl.textContent.trim().split(/\s+/)[0].split(',');
+    const lng = toNum(c[0]), lat = toNum(c[1]);
+    if(!validLatLng(lat, lng)){ res.skipped++; return; }
+
+    const label = childText(pm, 'name');
+    const desc = childText(pm, 'description');
+    let memo = desc, evName = '';
+    const fields = { lat, lng, label };
+
+    // dipで書き出したKMLは説明文が「項目: 値」の行になっているので、項目ごとに戻す
+    const lines = desc.split('\n');
+    if(lines.some(l=>l.startsWith('記録日時: '))){
+      memo = '';
+      lines.forEach(l=>{
+        const m = l.match(/^(.+?): (.*)$/);
+        if(!m) return;
+        const k = m[1], v = m[2];
+        if(k === 'メモ') memo = v;
+        else if(k === 'イベント') evName = v;
+        else if(k === '標高(参考値)'){ const n = toNum(v); if(n != null) fields.elevation = n; }
+        else if(k === '標高(測定値)'){ const n = toNum(v); if(n != null) fields.gpsAltitude = n; }
+        else if(k === '記録日時') fields.createdAt = parseTime(v);
+      });
+    } else {
+      // 他のアプリのKML:説明文のHTMLタグを外してメモにする
+      memo = desc.replace(/<br\s*\/?>/gi, '\n').replace(/<[^>]+>/g, '').trim();
+      // フォルダ(Googleマイマップのレイヤーなど)の名前をイベント名にする
+      let p = pm.parentElement;
+      while(p && !evName){
+        if(p.localName === 'Folder') evName = childText(p, 'name');
+        p = p.parentElement;
+      }
+    }
+    fields.memo = memo;
+    res.items.push({
+      id: null,
+      eventKey: evName ? noteImportEvent(res, { name:evName }) : null,
+      fields
+    });
+  });
+  return res;
+}
+
+// 引用符(")で囲まれた値・値の中の改行やカンマに対応したCSVの分解
+function splitCSV(text){
+  const rows = [];
+  let row = [], cell = '', q = false;
+  for(let i = 0; i < text.length; i++){
+    const ch = text[i];
+    if(q){
+      if(ch === '"'){
+        if(text[i+1] === '"'){ cell += '"'; i++; }
+        else q = false;
+      } else cell += ch;
+    } else if(ch === '"') q = true;
+    else if(ch === ','){ row.push(cell); cell = ''; }
+    else if(ch === '\n' || ch === '\r'){
+      if(ch === '\r' && text[i+1] === '\n') i++;
+      row.push(cell); rows.push(row); row = []; cell = '';
+    } else cell += ch;
+  }
+  if(cell !== '' || row.length){ row.push(cell); rows.push(row); }
+  return rows.filter(r=>r.some(v=>v.trim() !== ''));
+}
+
+function parseCSVPoints(text){
+  const rows = splitCSV(text);
+  if(rows.length < 2) throw new Error('CSVに見出し行とデータ行が必要です。');
+  const res = makeImportResult();
+  const head = rows[0].map(h=>h.trim().toLowerCase());
+  // 見出しの呼び名の違いを吸収する(dipの書き出し+よくある列名)
+  const ALIASES = {
+    lat: ['緯度','lat','latitude','y'],
+    lng: ['経度','lng','lon','long','longitude','x'],
+    label: ['名称','名前','label','name','title'],
+    memo: ['メモ','備考','memo','note','description'],
+    event: ['イベント','event'],
+    elevation_ref: ['標高(参考値)','elevation_ref'],
+    elevation_measured: ['標高(測定値)','elevation_measured'],
+    dip_deg: ['傾斜角(度)','dip_deg'],
+    dip_direction_deg: ['傾斜方向(度)','dip_direction_deg'],
+    heading_deg: ['方位(度)','heading_deg'],
+    created_at: ['記録日時','created_at'],
+  };
+  const col = {};
+  Object.keys(ALIASES).forEach(k=>{
+    const i = head.findIndex(h=>ALIASES[k].includes(h));
+    if(i >= 0) col[k] = i;
+  });
+  if(col.lat == null || col.lng == null){
+    throw new Error('緯度・経度の列が見つかりませんでした。(見出しを「緯度」「経度」または lat / lng にしてください)');
+  }
+  rows.slice(1).forEach(r=>{
+    const flat = {};
+    Object.keys(col).forEach(k=>{ flat[k] = r[col[k]] != null ? r[col[k]].trim() : ''; });
+    const lat = toNum(flat.lat), lng = toNum(flat.lng);
+    if(!validLatLng(lat, lng)){ res.skipped++; return; }
+    const fields = Object.assign(pointFieldsFromFlat(flat), { lat, lng });
+    res.items.push({
+      id: null,
+      eventKey: flat.event ? noteImportEvent(res, { name:flat.event }) : null,
+      fields
+    });
+  });
+  return res;
+}
+
+/* --- 読み込み先を選ぶダイアログ --- */
+function openImportDialog(file, parsed){
+  const baseName = file.name.replace(/\.[^.]+$/, '') || '読み込んだポイント';
+  const hasFileEvents = parsed.events.size > 0;
+  const existing = eventsOf('point');
+
+  const back = document.createElement('div');
+  back.className = 'modal-back';
+  back.innerHTML = `
+    <div class="modal">
+      <div class="modal-title">ポイントの読み込み</div>
+      <div class="modal-sub">${escapeHtml(file.name)}（${parsed.items.length}点${parsed.skipped ? `・読めない記録${parsed.skipped}件` : ''}）</div>
+      <div class="modal-label">読み込み先のイベント</div>
+      <select class="modal-select" id="impDest">
+        ${hasFileEvents ? `<option value="__file">ファイルのイベントのまま(${parsed.events.size}件)</option>` : ''}
+        <option value="__new">新しいイベント「${escapeHtml(baseName)}」を作る</option>
+        ${existing.map(ev=>`<option value="${ev.id}">${escapeHtml(ev.name)}</option>`).join('')}
+      </select>
+      <div class="modal-note">同じポイントがすでにある場合は、新しい方の内容に置き換えます。</div>
+      <div class="btn-row">
+        <button class="btn btn-ghost modal-cancel" style="margin-top:0;">キャンセル</button>
+        <button class="btn btn-primary" id="impGo">読み込む</button>
+      </div>
+    </div>`;
+  document.body.appendChild(back);
+
+  const close = ()=>back.remove();
+  back.addEventListener('click', e=>{ if(e.target === back) close(); });
+  back.querySelector('.modal-cancel').addEventListener('click', close);
+  back.querySelector('#impGo').addEventListener('click', ()=>{
+    const dest = back.querySelector('#impDest').value;
+    close();
+    const r = applyImport(parsed, dest, baseName);
+    const parts = [];
+    if(r.added) parts.push(`${r.added}点を追加`);
+    if(r.updated) parts.push(`${r.updated}点を更新`);
+    if(r.unchanged) parts.push(`${r.unchanged}点は手元の方が新しいため変更なし`);
+    alert('読み込みました。\n' + (parts.join('、') || '変更はありませんでした。'));
+  });
+}
+
+// まだ使われていない色を選ぶ(なければ順番に)
+function pickEventColor(){
+  const used = new Set(eventsOf('point').map(e=>e.color));
+  return EVENT_COLORS.find(c=>!used.has(c)) || EVENT_COLORS[eventsOf('point').length % EVENT_COLORS.length];
+}
+function createImportedEvent(info){
+  // dipで書き出したイベントは同じIDのまま作る(何度読み込んでも1つにまとまるように)
+  const idFree = info.id && !events.some(e=>e.id === info.id);
+  const ev = {
+    id: idFree ? info.id : newId('ev'),
+    name: info.name || '読み込んだポイント',
+    color: EVENT_COLORS.includes(info.color) ? info.color : pickEventColor(),
+    shape: EVENT_SHAPES.includes(info.shape) ? info.shape : 'circle',
+    kind: 'point'
+  };
+  deletedEvents = deletedEvents.filter(d=>d.id !== ev.id);
+  events.push(ev);
+  return ev;
+}
+
+function applyImport(parsed, dest, baseName){
+  const result = { added:0, updated:0, unchanged:0 };
+  const resolved = new Map();   // ファイルのイベントのキー → 手元のイベントID
+  let newEvent = null;
+
+  const eventIdFor = item=>{
+    if(dest === '__new'){
+      if(!newEvent) newEvent = createImportedEvent({ name: baseName });
+      return newEvent.id;
+    }
+    if(dest !== '__file') return dest;
+    if(!item.eventKey) return defaultEventId('point');
+    if(resolved.has(item.eventKey)) return resolved.get(item.eventKey);
+    const info = parsed.events.get(item.eventKey);
+    // 同じID → 同じ名前のポイント用イベント → 新規作成 の順で探す
+    let ev = info.id ? findEvent(info.id) : null;
+    if(ev && ev.kind !== 'point') ev = null;
+    if(!ev) ev = eventsOf('point').find(e=>e.name === info.name) || null;
+    if(!ev) ev = createImportedEvent(info);
+    resolved.set(item.eventKey, ev.id);
+    return ev.id;
+  };
+
+  const touched = [];
+  parsed.items.forEach(item=>{
+    const evId = eventIdFor(item);
+    const f = item.fields;
+    const existing = item.id ? points.find(p=>p.id === item.id) : null;
+
+    if(existing){
+      // 同じポイントが手元にある:ファイルの方が新しいときだけ置き換える
+      if(item.updatedAt != null && existing.updatedAt != null && item.updatedAt <= existing.updatedAt){
+        result.unchanged++;
+        return;
+      }
+      Object.assign(existing, f, { eventId: evId });
+      existing.marker.setLatLng([existing.lat, existing.lng]);
+      existing.marker.setIcon(pointIcon(existing));
+      existing.marker.setPopupContent(buildPointPopup(existing));
+      touched.push(existing);
+      result.updated++;
+      return;
+    }
+
+    const point = Object.assign({
+      label:'', memo:'', orientation:null, elevation:null, elevationSource:null, gpsAltitude:null, geology:null
+    }, f, {
+      id: item.id || newId('p'),
+      eventId: evId,
+      createdAt: f.createdAt || Date.now()
+    });
+    // 以前ここで削除していたポイントを読み込み直した場合は、削除記録を取り消す
+    deletedPoints = deletedPoints.filter(d=>d.id !== point.id);
+    createPointMarker(point);
+    points.push(point);
+    touched.push(point);
+    result.added++;
+  });
+
+  saveEvents();
+  savePoints();
+  renderPointsView();
+  renderHistoryIfOpen();
+  if(touched.length){
+    const bounds = L.latLngBounds(touched.map(p=>[p.lat, p.lng]));
+    map.fitBounds(bounds, { padding:[40,40], maxZoom:16 });
+  }
+  return result;
 }
 
 loadPoints();
