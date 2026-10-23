@@ -641,8 +641,8 @@ function showJoinLogin(code){
   back.innerHTML = `
     <div class="modal">
       <div class="modal-title">イベントへの招待</div>
-      <div class="modal-sub">招待されたイベントに参加するには、Googleアカウントでログインしてください。</div>
-      <div class="modal-note">ログインすると、参加したイベントのポイントがメンバー全員と共有されます。詳しくは「情報」のプライバシーポリシーをご覧ください。</div>
+      <div class="modal-sub">　招待されたイベントに参加するには、Googleアカウントでログインしてください。</div>
+      <div class="modal-note">　ログインすると、参加したイベントのポイントがメンバー全員と共有されます。詳しくは「情報」のプライバシーポリシーをご覧ください。</div>
       <div class="btn-row">
         <button class="btn btn-ghost modal-cancel" style="margin-top:0;">参加しない</button>
         <button class="btn btn-primary" id="joinLogin">ログインして参加</button>
