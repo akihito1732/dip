@@ -1,4 +1,4 @@
-const CACHE_NAME = 'dip-v35';
+const CACHE_NAME = 'dip-v36';
 
 // アプリ本体(地図タイルは含めない。タイルは通信時のみ取得)
 const APP_SHELL = [
