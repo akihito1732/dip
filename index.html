@@ -2839,7 +2839,6 @@ function renderPointEventList(host){
     </div>
     <div class="btn-row" style="margin-bottom:12px;">
       <button class="btn btn-ghost" id="evNew">イベント作成</button>
-      <button class="btn btn-ghost" id="pointsExport">全て書き出し</button>
       <button class="btn btn-ghost" id="pointsImport">読み込み</button>
     </div>
     <div id="syncBar"></div>
@@ -3893,8 +3892,16 @@ function renderHistoryRoot(){
         <span class="hc-label">${pg.label}</span>
         ${ARROW_SVG}
       </div>`;
-    }).join('');
+    }).join('') +
+    `<div class="hist-cat" id="backupAll">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3.5v11"/><polyline points="7.5 10 12 14.5 16.5 10"/><path d="M4.5 15.5v3.2c0 1 .8 1.8 1.8 1.8h11.4c1 0 1.8-.8 1.8-1.8v-3.2"/></svg>
+      <span class="hc-label">バックアップ</span>
+    </div>`;
 
+  document.getElementById('backupAll').addEventListener('click', ()=>{
+    closeDrawers();
+    openExportPicker();
+  });
   historyPanel.querySelectorAll('[data-info]').forEach(el=>{
     el.addEventListener('click', ()=>Info.open(el.dataset.info));
   });
